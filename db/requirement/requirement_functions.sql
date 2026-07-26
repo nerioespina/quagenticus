@@ -1,0 +1,1 @@
+-- Requirement functions (stubs)

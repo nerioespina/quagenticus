@@ -1,0 +1,1 @@
+-- Document link functions (stubs)

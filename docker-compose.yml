@@ -1,0 +1,93 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: quagenticus
+      POSTGRES_USER: qg
+      POSTGRES_PASSWORD: qg
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qg -d quagenticus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5433:5432"
+
+  migrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrator
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      QG_DB_HOST: db
+      QG_DB_PORT: 5432
+      QG_DB_NAME: quagenticus
+      QG_DB_USER: qg
+      QG_DB_SCHEMA: quagenticus
+      PGPASSWORD: qg
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      QG_DATABASE_URL: postgresql://qg:qg@db:5432/quagenticus
+      QG_DB_SCHEMA: quagenticus
+      QG_SECRET_KEY: ${QG_SECRET_KEY:-default-insecure-secret-key-12345678901234567890}
+      QG_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      QG_STORAGE_BACKEND: fs
+      QG_STORAGE_PATH: /var/lib/quagenticus/attachments
+    volumes:
+      - attachments:/var/lib/quagenticus/attachments
+    ports:
+      - "18080:8080"
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mcp
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      QG_API_BASE_URL: http://api:8080/api/v1
+      QG_MCP_TRANSPORT: streamable-http
+    ports:
+      - "18081:8081"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      QG_DATABASE_URL: postgresql://qg:qg@db:5432/quagenticus
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  pgdata: {}
+  attachments: {}

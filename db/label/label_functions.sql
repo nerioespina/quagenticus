@@ -1,0 +1,1 @@
+-- Label functions (stubs)
