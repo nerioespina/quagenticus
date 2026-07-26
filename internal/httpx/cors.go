@@ -1,0 +1,37 @@
+package httpx
+
+import (
+	"net/http"
+)
+
+// CORS returns a middleware that sets Access-Control headers.
+func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
+	wildcard := len(allowedOrigins) == 1 && allowedOrigins[0] == "*"
+	allowed := make(map[string]struct{}, len(allowedOrigins))
+	for _, o := range allowedOrigins {
+		allowed[o] = struct{}{}
+	}
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := r.Header.Get("Origin")
+			if origin != "" {
+				if wildcard {
+					w.Header().Set("Access-Control-Allow-Origin", "*")
+				} else if _, ok := allowed[origin]; ok {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Add("Vary", "Origin")
+				}
+				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Max-Age", "600")
+			}
+
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

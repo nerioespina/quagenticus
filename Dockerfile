@@ -58,5 +58,6 @@ RUN npm run build
 
 FROM nginx:alpine AS web
 COPY --from=web-builder /web/dist /usr/share/nginx/html
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
 

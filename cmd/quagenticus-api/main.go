@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,8 @@ import (
 	"github.com/nespina/quagenticus/internal/auth"
 	"github.com/nespina/quagenticus/internal/config"
 	"github.com/nespina/quagenticus/internal/db"
+	"github.com/nespina/quagenticus/internal/handlers"
+	"github.com/nespina/quagenticus/internal/httpx"
 )
 
 func main() {
@@ -33,26 +36,82 @@ func main() {
 	}
 	defer database.Pool.Close()
 
-	r := chi.NewRouter()
+	authH := handlers.NewAuth(database, cfg.SecretKey)
+	docsH := handlers.NewDocuments(database)
+	spacesH := handlers.NewSpaces(database)
+	reqsH := handlers.NewRequirements(database)
+	boardsH := handlers.NewBoards(database)
 
+	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(httpx.CORS(cfg.AllowedOrigins))
 	r.Use(auth.Authenticate(cfg.SecretKey))
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		w.Write([]byte("ok")) //nolint:errcheck
 	})
 
+	r.Route("/api/v1", func(r chi.Router) {
+		// Public
+		r.Post("/auth/login", authH.Login)
+
+		// Protected
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAuth)
+
+			r.Get("/auth/me", authH.Me)
+
+			// Spaces
+			r.Get("/spaces", spacesH.List)
+			r.Post("/spaces", spacesH.Create)
+			r.Get("/spaces/{spaceId}", spacesH.Get)
+
+			// Documents (nested under space)
+			r.Get("/spaces/{spaceId}/documents", docsH.List)
+			r.Post("/spaces/{spaceId}/documents", docsH.Create)
+			r.Get("/spaces/{spaceId}/boards", boardsH.List)
+
+			// Documents (by id)
+			r.Get("/documents/{id}", docsH.Get)
+			r.Patch("/documents/{id}", docsH.Update)
+			r.Delete("/documents/{id}", docsH.Delete)
+			r.Get("/documents/{id}/history", docsH.History)
+
+			// Requirements (nested under space)
+			r.Get("/spaces/{spaceId}/requirements", reqsH.List)
+			r.Post("/spaces/{spaceId}/requirements", reqsH.Create)
+
+			// Requirements (by id)
+			r.Get("/requirements/{id}", reqsH.Get)
+			r.Patch("/requirements/{id}", reqsH.Update)
+			r.Post("/requirements/{id}/transition", reqsH.Transition)
+			r.Post("/requirements/{id}/members", reqsH.AddMember)
+			r.Delete("/requirements/{id}/members/{userId}", reqsH.RemoveMember)
+			r.Get("/requirements/{id}/readiness", reqsH.Readiness)
+			r.Patch("/requirements/{id}/position", reqsH.UpdatePosition)
+
+			// Boards
+			r.Get("/spaces/{spaceId}/boards/{boardId}", boardsH.Get)
+
+			// Catalogs (read-only lookups for UI selects)
+			r.Get("/catalogs/trackers", docsH.Trackers)
+			r.Get("/catalogs/priorities", docsH.Priorities)
+			r.Get("/catalogs/labels", docsH.Labels)
+		})
+	})
+
+	addr := fmt.Sprintf(":%d", cfg.Port)
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    addr,
 		Handler: r,
 	}
 
 	go func() {
-		slog.Info("starting server", "addr", server.Addr)
+		slog.Info("starting server", "addr", addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)

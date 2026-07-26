@@ -2,13 +2,10 @@ package httpx
 
 import (
 	"context"
+
+	"github.com/go-chi/chi/v5/middleware"
 )
 
-type requestIDKey struct{}
-
 func RequestIDFrom(ctx context.Context) string {
-	if val, ok := ctx.Value(requestIDKey{}).(string); ok {
-		return val
-	}
-	return ""
+	return middleware.GetReqID(ctx)
 }
