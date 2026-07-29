@@ -1,8 +1,8 @@
-CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid(), crypt()
-CREATE EXTENSION IF NOT EXISTS unaccent;    -- slugs y búsqueda sin acentos
-CREATE EXTENSION IF NOT EXISTS pg_trgm;     -- búsqueda difusa y autocompletado
-CREATE EXTENSION IF NOT EXISTS btree_gin;   -- índices compuestos con tsvector
-CREATE EXTENSION IF NOT EXISTS citext;      -- Used in app_user.email
+CREATE EXTENSION IF NOT EXISTS pgcrypto  WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS unaccent  WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pg_trgm   WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS btree_gin WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS citext    WITH SCHEMA public;
 
 CREATE OR REPLACE FUNCTION qg_unaccent(text) RETURNS text AS $$
     SELECT public.unaccent('public.unaccent'::regdictionary, $1);
