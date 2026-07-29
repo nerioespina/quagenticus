@@ -4,6 +4,8 @@ import { Save, Eye, Edit3, ArrowLeft, Loader2 } from 'lucide-react';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { useDocument, useUpdateDocument } from '../hooks/useDocuments';
+import MarkdownToolbar from '../components/MarkdownToolbar';
+
 
 function MarkdownPreview({ content }: { content: string }) {
   const lines = content.split('\n');
@@ -109,16 +111,27 @@ export default function DocumentEditor() {
       {/* Editor area */}
       <div className="flex-1 overflow-hidden flex">
         {(mode === 'edit' || mode === 'split') && (
-          <div className={`${mode === 'split' ? 'w-1/2 border-r border-slate-800' : 'flex-1'} overflow-auto`}>
-            <CodeMirror
-              value={content}
-              onChange={handleContentChange}
-              extensions={[markdown()]}
-              theme="dark"
-              height="100%"
-              style={{ height: '100%', fontSize: '13px' }}
-              basicSetup={{ lineNumbers: true, foldGutter: false }}
+          <div className={`${mode === 'split' ? 'w-1/2 border-r border-slate-800' : 'flex-1'} overflow-auto flex flex-col`}>
+            <MarkdownToolbar
+              onCustomAction={(action) => {
+                const add = `${action.prefix}${action.defaultText}${action.suffix}`;
+                const newContent = content ? `${content}\n${add}` : add;
+                setContent(newContent);
+                setDirty(true);
+              }}
+              className="border-0 border-b border-slate-800 rounded-none shrink-0 bg-slate-900"
             />
+            <div className="flex-1 overflow-auto">
+              <CodeMirror
+                value={content}
+                onChange={handleContentChange}
+                extensions={[markdown()]}
+                theme="dark"
+                height="100%"
+                style={{ height: '100%', fontSize: '13px' }}
+                basicSetup={{ lineNumbers: true, foldGutter: false }}
+              />
+            </div>
           </div>
         )}
         {(mode === 'preview' || mode === 'split') && (

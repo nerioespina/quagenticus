@@ -1,10 +1,12 @@
-import { useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useState, useRef } from 'react';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import { Plus, Loader2 } from 'lucide-react';
 import { useRequirements, useCreateRequirement } from '../hooks/useRequirements';
 import { api } from '../lib/api';
 import type { Tracker, Priority } from '../lib/api';
 import { useQuery } from '@tanstack/react-query';
+import Modal from '../components/Modal';
+import MarkdownToolbar from '../components/MarkdownToolbar';
 
 interface Context { spaceId: string; search: string }
 
@@ -28,6 +30,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function RequirementsList() {
   const { spaceId, search } = useOutletContext<Context>();
+  const navigate = useNavigate();
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { data: reqs = [], isLoading } = useRequirements(spaceId);
   const { data: trackers = [] } = useTrackers();
   const { data: priorities = [] } = usePriorities();
@@ -75,60 +79,90 @@ export default function RequirementsList() {
         </button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleCreate} className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-3">
-          <h3 className="text-sm font-semibold text-slate-200">Nuevo requerimiento</h3>
-          <input
-            placeholder="Título del requerimiento"
-            value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-            required
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <select
-              value={form.tracker_id}
-              onChange={e => setForm(f => ({ ...f, tracker_id: e.target.value }))}
+      <Modal
+        isOpen={showForm}
+        onClose={() => setShowForm(false)}
+        title="Nuevo requerimiento"
+      >
+        <form onSubmit={handleCreate} className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+              Título
+            </label>
+            <input
+              placeholder="Título del requerimiento"
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
               required
-              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none"
-            >
-              <option value="">Tracker…</option>
-              {trackers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-            <select
-              value={form.priority_id}
-              onChange={e => setForm(f => ({ ...f, priority_id: e.target.value }))}
-              className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none"
-            >
-              <option value="">Prioridad…</option>
-              {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60"
+            />
           </div>
-          <textarea
-            placeholder="Descripción en Markdown (opcional)"
-            value={form.body_md}
-            onChange={e => setForm(f => ({ ...f, body_md: e.target.value }))}
-            rows={3}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500/60 font-mono resize-none"
-          />
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              disabled={createReq.isPending}
-              className="flex-1 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-sm font-semibold transition-colors"
-            >
-              {createReq.isPending ? 'Creando…' : 'Crear requerimiento'}
-            </button>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Tracker
+              </label>
+              <select
+                value={form.tracker_id}
+                onChange={e => setForm(f => ({ ...f, tracker_id: e.target.value }))}
+                required
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none"
+              >
+                <option value="">Seleccionar Tracker…</option>
+                {trackers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                Prioridad
+              </label>
+              <select
+                value={form.priority_id}
+                onChange={e => setForm(f => ({ ...f, priority_id: e.target.value }))}
+                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none"
+              >
+                <option value="">Seleccionar Prioridad…</option>
+                {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+              Descripción (Markdown)
+            </label>
+            <div className="border border-slate-700/80 rounded-lg overflow-hidden bg-slate-800/40">
+              <MarkdownToolbar
+                textareaRef={textareaRef}
+                onValueChange={(val) => setForm(f => ({ ...f, body_md: val }))}
+              />
+              <textarea
+                ref={textareaRef}
+                placeholder="Escribe la descripción en formato Markdown..."
+                value={form.body_md}
+                onChange={e => setForm(f => ({ ...f, body_md: e.target.value }))}
+                rows={10}
+                className="w-full bg-slate-900 border-t border-slate-700/80 p-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none font-mono resize-y min-h-[200px]"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
             <button
               type="button"
               onClick={() => setShowForm(false)}
-              className="flex-1 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-colors"
+              className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold transition-colors"
             >
               Cancelar
             </button>
+            <button
+              type="submit"
+              disabled={createReq.isPending}
+              className="px-5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 text-white text-sm font-semibold transition-colors"
+            >
+              {createReq.isPending ? 'Creando…' : 'Crear requerimiento'}
+            </button>
           </div>
         </form>
-      )}
+      </Modal>
 
       <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
         {isLoading ? (
@@ -156,17 +190,21 @@ export default function RequirementsList() {
                 const tracker = trackerMap[r.tracker_id];
                 const priority = priorityMap[r.priority_id];
                 return (
-                  <tr key={r.id} className="hover:bg-slate-800/30 cursor-pointer transition-colors">
+                  <tr
+                    key={r.id}
+                    onClick={() => navigate(`/spaces/${spaceId}/requirements/${r.id}`)}
+                    className="hover:bg-slate-800/30 cursor-pointer transition-colors"
+                  >
                     <td className="py-3 px-4 font-mono font-semibold text-indigo-400 whitespace-nowrap">{r.ref_key}</td>
                     <td className="py-3 px-4 uppercase text-xs font-mono text-slate-500">{tracker?.key ?? '—'}</td>
                     <td className="py-3 px-4 font-medium text-slate-200">{r.title}</td>
                     <td className="py-3 px-4">
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[r.status_id] ?? STATUS_COLORS.new}`}>
-                        {r.status_id}
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[r.status_key] ?? STATUS_COLORS.new}`}>
+                        {r.status_name || r.status_id}
                       </span>
                     </td>
                     <td className="py-3 px-4">
-                      <span className="text-xs text-slate-400">{priority?.name ?? r.priority_id}</span>
+                      <span className="text-xs text-slate-400">{priority?.name ?? r.priority_name ?? r.priority_id}</span>
                     </td>
                     <td className="py-3 px-4">
                       {r.readiness_score != null ? (

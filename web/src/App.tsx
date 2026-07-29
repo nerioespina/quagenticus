@@ -3,11 +3,13 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuth } from './lib/auth';
 
+import { useTheme } from './lib/theme';
 import Login from './pages/Login';
 import SpaceSelector from './pages/SpaceSelector';
 import SpaceLayout from './components/SpaceLayout';
 import Board from './pages/Board';
 import RequirementsList from './pages/RequirementsList';
+import RequirementDetail from './pages/RequirementDetail';
 import DocumentsList from './pages/DocumentsList';
 import DocumentEditor from './pages/DocumentEditor';
 import AgentQueue from './pages/AgentQueue';
@@ -29,6 +31,7 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  useTheme();
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
@@ -49,6 +52,7 @@ export default function App() {
             <Route index element={<Navigate to="board" replace />} />
             <Route path="board" element={<Board />} />
             <Route path="requirements" element={<RequirementsList />} />
+            <Route path="requirements/:reqId" element={<RequirementDetail />} />
             <Route path="docs" element={<DocumentsList />} />
             <Route path="docs/:docId" element={<DocumentEditor />} />
             <Route path="agents" element={<AgentQueue />} />

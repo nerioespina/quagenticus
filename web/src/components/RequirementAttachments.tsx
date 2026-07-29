@@ -1,0 +1,254 @@
+import { useState } from 'react';
+import {
+  FileText,
+  Link as LinkIcon,
+  Trash2,
+  Download,
+  Plus,
+  Paperclip,
+  GitBranch,
+} from 'lucide-react';
+import { useAttachments, useUploadAttachment, useDeleteAttachment } from '../hooks/useAttachments';
+import {
+  useDocumentLinks,
+  useCreateDocumentLink,
+  useDeleteDocumentLink,
+} from '../hooks/useDocumentLinks';
+import FileDropZone from './FileDropZone';
+import LinkDocumentModal from './LinkDocumentModal';
+
+interface RequirementAttachmentsProps {
+  spaceId: string;
+  reqId: string;
+}
+
+const LINK_TYPE_LABELS: Record<string, string> = {
+  relates: 'Se relaciona con',
+  specifies: 'Especifica',
+  implements: 'Implementa',
+  blocks: 'Bloquea a',
+  blocked_by: 'Bloqueado por',
+  duplicates: 'Duplica a',
+  duplicated_by: 'Duplicado por',
+  precedes: 'Precede a',
+  follows: 'Sigue a',
+};
+
+export default function RequirementAttachments({ spaceId, reqId }: RequirementAttachmentsProps) {
+  const { data: attachments = [], isLoading: loadingAttach } = useAttachments(reqId);
+  const uploadAttach = useUploadAttachment(reqId);
+  const deleteAttach = useDeleteAttachment(reqId);
+
+  const { data: links = [], isLoading: loadingLinks } = useDocumentLinks(reqId);
+  const createLink = useCreateDocumentLink(reqId);
+  const deleteLink = useDeleteDocumentLink(reqId);
+
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalFilter, setModalFilter] = useState<'all' | 'requirement'>('all');
+
+  const handleOpenModal = (filter: 'all' | 'requirement') => {
+    setModalFilter(filter);
+    setIsModalOpen(true);
+  };
+
+  const handleLinkDocument = (target_id: string, link_type: string, note?: string) => {
+    createLink.mutate({ target_id, link_type, note });
+  };
+
+  const handleUploadFile = (file: File) => {
+    uploadAttach.mutate(file);
+  };
+
+  const docLinks = links.filter((l) => l.target_type !== 'requirement');
+  const reqLinks = links.filter((l) => l.target_type === 'requirement');
+
+  return (
+    <div className="space-y-8">
+      {/* Knowledge Documents Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-indigo-400" />
+            <h3 className="text-sm font-semibold text-slate-200">
+              Documentos de Conocimiento Vinculados
+            </h3>
+            <span className="text-xs text-slate-500 font-mono">({docLinks.length})</span>
+          </div>
+          <button
+            onClick={() => handleOpenModal('all')}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Vincular Documento
+          </button>
+        </div>
+
+        {loadingLinks ? (
+          <p className="text-xs text-slate-500 italic">Cargando enlaces...</p>
+        ) : docLinks.length === 0 ? (
+          <p className="text-xs text-slate-500 italic">
+            No hay documentos vinculados a este requerimiento.
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-800/80 border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/40">
+            {docLinks.map((link) => (
+              <div
+                key={link.id}
+                className="flex items-center justify-between p-3 hover:bg-slate-800/40 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <LinkIcon className="h-4 w-4 text-slate-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-200 truncate">
+                        {link.target_title}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 shrink-0">
+                        {LINK_TYPE_LABELS[link.link_type] || link.link_type}
+                      </span>
+                      <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">
+                        {link.target_type}
+                      </span>
+                    </div>
+                    {link.note && (
+                      <p className="text-xs text-slate-400 mt-0.5 italic">{link.note}</p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => deleteLink.mutate(link.id)}
+                  className="p-1.5 rounded hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition-colors shrink-0"
+                  title="Eliminar enlace"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Requirement Relationships Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center gap-2">
+            <GitBranch className="h-4 w-4 text-violet-400" />
+            <h3 className="text-sm font-semibold text-slate-200">
+              Relaciones entre Requerimientos
+            </h3>
+            <span className="text-xs text-slate-500 font-mono">({reqLinks.length})</span>
+          </div>
+          <button
+            onClick={() => handleOpenModal('requirement')}
+            className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-violet-600/20 text-violet-300 hover:bg-violet-600/30 transition-colors"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Relacionar Requerimiento
+          </button>
+        </div>
+
+        {reqLinks.length === 0 ? (
+          <p className="text-xs text-slate-500 italic">
+            No hay otros requerimientos relacionados.
+          </p>
+        ) : (
+          <div className="divide-y divide-slate-800/80 border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/40">
+            {reqLinks.map((link) => (
+              <div
+                key={link.id}
+                className="flex items-center justify-between p-3 hover:bg-slate-800/40 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <GitBranch className="h-4 w-4 text-violet-400 shrink-0" />
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-200 truncate">
+                        {link.target_title}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-300 border border-violet-500/20 shrink-0">
+                        {LINK_TYPE_LABELS[link.link_type] || link.link_type}
+                      </span>
+                    </div>
+                    {link.note && (
+                      <p className="text-xs text-slate-400 mt-0.5 italic">{link.note}</p>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => deleteLink.mutate(link.id)}
+                  className="p-1.5 rounded hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition-colors shrink-0"
+                  title="Eliminar relación"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Attachments Section */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+          <div className="flex items-center gap-2">
+            <Paperclip className="h-4 w-4 text-emerald-400" />
+            <h3 className="text-sm font-semibold text-slate-200">Archivos Adjuntos</h3>
+            <span className="text-xs text-slate-500 font-mono">({attachments.length})</span>
+          </div>
+        </div>
+
+        <FileDropZone onUpload={handleUploadFile} isUploading={uploadAttach.isPending} />
+
+        {loadingAttach ? (
+          <p className="text-xs text-slate-500 italic">Cargando archivos...</p>
+        ) : attachments.length > 0 ? (
+          <div className="divide-y divide-slate-800/80 border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/40">
+            {attachments.map((att) => (
+              <div
+                key={att.id}
+                className="flex items-center justify-between p-3 hover:bg-slate-800/40 transition-colors"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Paperclip className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium text-slate-200 truncate">{att.filename}</p>
+                    <p className="text-[10px] text-slate-500 font-mono">
+                      {(att.byte_size / 1024).toFixed(1)} KB · {att.content_type}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <a
+                    href={`/api/v1/attachments/${att.id}/download`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 rounded hover:bg-indigo-500/10 text-slate-400 hover:text-indigo-300 transition-colors"
+                    title="Descargar archivo"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </a>
+                  <button
+                    onClick={() => deleteAttach.mutate(att.id)}
+                    className="p-1.5 rounded hover:bg-red-500/10 text-slate-500 hover:text-red-400 transition-colors"
+                    title="Eliminar archivo"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      <LinkDocumentModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        spaceId={spaceId}
+        currentReqId={reqId}
+        onLink={handleLinkDocument}
+        filterType={modalFilter}
+      />
+    </div>
+  );
+}

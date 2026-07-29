@@ -120,3 +120,37 @@ func (h *Spaces) Get(w http.ResponseWriter, r *http.Request) {
 
 	httpx.RespondJSON(w, http.StatusOK, s)
 }
+
+func (h *Spaces) ListMembers(w http.ResponseWriter, r *http.Request) {
+	spaceID := chi.URLParam(r, "spaceId")
+	rows, err := h.db.Pool.Query(r.Context(), `
+		SELECT sm.subject_id, u.display_name, u.email, sm.role
+		FROM space_member sm
+		JOIN app_user u ON sm.subject_id = u.id
+		WHERE sm.space_id = $1 AND sm.subject_type = 'user'
+		ORDER BY u.display_name
+	`, spaceID)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	defer rows.Close()
+
+	type SpaceMember struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+		Email       string `json:"email"`
+		Role        string `json:"role"`
+	}
+	members := make([]SpaceMember, 0)
+	for rows.Next() {
+		var m SpaceMember
+		if err := rows.Scan(&m.ID, &m.DisplayName, &m.Email, &m.Role); err != nil {
+			httpx.RespondError(w, err)
+			return
+		}
+		members = append(members, m)
+	}
+	httpx.RespondJSON(w, http.StatusOK, members)
+}
+

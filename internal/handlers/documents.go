@@ -302,3 +302,41 @@ func (h *Documents) Labels(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.RespondJSON(w, http.StatusOK, list)
 }
+
+func (h *Documents) Statuses(w http.ResponseWriter, r *http.Request) {
+	actor := auth.ActorFrom(r.Context())
+
+	type statusRow struct {
+		ID        string  `json:"id"`
+		Key       string  `json:"key"`
+		Name      string  `json:"name"`
+		Color     *string `json:"color"`
+		Ord       int     `json:"ord"`
+		IsDefault bool    `json:"is_default"`
+		IsClosed  bool    `json:"is_closed"`
+	}
+
+	rows, err := h.db.Pool.Query(r.Context(), `
+		SELECT id, key, name, color, ord, is_default, is_closed
+		FROM workflow_status
+		WHERE account_id = $1
+		ORDER BY ord
+	`, actor.AccountID)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	defer rows.Close()
+
+	list := make([]statusRow, 0)
+	for rows.Next() {
+		var s statusRow
+		if err := rows.Scan(&s.ID, &s.Key, &s.Name, &s.Color, &s.Ord, &s.IsDefault, &s.IsClosed); err != nil {
+			httpx.RespondError(w, err)
+			return
+		}
+		list = append(list, s)
+	}
+	httpx.RespondJSON(w, http.StatusOK, list)
+}
+

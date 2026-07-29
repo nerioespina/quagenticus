@@ -1,14 +1,16 @@
 import { useState } from 'react';
 import { Link, NavLink, useParams, Outlet } from 'react-router-dom';
-import { Layers, Kanban, ListTodo, FileText, Bot, Search, LogOut, Database, Cpu, Terminal } from 'lucide-react';
+import { Layers, Kanban, ListTodo, FileText, Bot, Search, LogOut, Database, Cpu, Terminal, Sun, Moon } from 'lucide-react';
 import { useSpace } from '../hooks/useSpaces';
 import { useAuth } from '../lib/auth';
+import { useTheme } from '../lib/theme';
 
 export default function SpaceLayout() {
   const { spaceId = '' } = useParams();
   const { data: space } = useSpace(spaceId);
   const user = useAuth(s => s.user);
   const logout = useAuth(s => s.logout);
+  const { theme, toggleTheme } = useTheme();
   const [search, setSearch] = useState('');
 
   const navItem = (to: string, icon: React.ReactNode, label: string) => (
@@ -91,9 +93,18 @@ export default function SpaceLayout() {
                 </div>
                 <span className="text-xs text-slate-300 truncate max-w-[120px]">{user.display_name}</span>
               </div>
-              <button onClick={logout} className="p-1.5 rounded-md hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors">
-                <LogOut className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={toggleTheme}
+                  title="Cambiar tema (claro/oscuro)"
+                  className="p-1.5 rounded-md hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                </button>
+                <button onClick={logout} className="p-1.5 rounded-md hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors">
+                  <LogOut className="h-4 w-4" />
+                </button>
+              </div>
             </div>
           )}
         </div>

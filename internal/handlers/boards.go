@@ -32,6 +32,8 @@ type boardCard struct {
 	RefKey        *string   `json:"ref_key"`
 	Title         string    `json:"title"`
 	PriorityID    string    `json:"priority_id"`
+	PriorityKey   string    `json:"priority_key"`
+	PriorityName  string    `json:"priority_name"`
 	LeadUserID    *string   `json:"lead_user_id"`
 	BoardPosition float64   `json:"board_position"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -120,9 +122,11 @@ func (h *Boards) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		cardRows, err := h.db.Pool.Query(r.Context(), `
 			SELECT r.document_id, d.ref_key, d.title,
-			       r.priority_id, r.lead_user_id, r.board_position, r.updated_at
+			       r.priority_id, pr.key AS priority_key, pr.name AS priority_name,
+			       r.lead_user_id, r.board_position, r.updated_at
 			FROM requirement r
 			JOIN document d ON d.id = r.document_id
+			JOIN priority pr ON pr.id = r.priority_id
 			WHERE r.space_id = $1 AND r.status_id = $2 AND r.closed_at IS NULL
 			ORDER BY r.board_position, r.created_at
 		`, spaceID, col.StatusID)
@@ -135,7 +139,8 @@ func (h *Boards) Get(w http.ResponseWriter, r *http.Request) {
 			var c boardCard
 			if err := cardRows.Scan(
 				&c.ID, &c.RefKey, &c.Title,
-				&c.PriorityID, &c.LeadUserID, &c.BoardPosition, &c.UpdatedAt,
+				&c.PriorityID, &c.PriorityKey, &c.PriorityName,
+				&c.LeadUserID, &c.BoardPosition, &c.UpdatedAt,
 			); err != nil {
 				cardRows.Close()
 				httpx.RespondError(w, err)

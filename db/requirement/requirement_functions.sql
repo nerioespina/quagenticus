@@ -187,3 +187,21 @@ BEGIN
     WHERE document_id = p_id;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Moves a requirement: optionally transitions status and reorders board position atomically.
+CREATE OR REPLACE FUNCTION requirement_move(
+    p_id           uuid,
+    p_to_status_id uuid DEFAULT NULL,
+    p_before_id    uuid DEFAULT NULL,
+    p_after_id     uuid DEFAULT NULL
+) RETURNS void AS $$
+BEGIN
+    IF p_to_status_id IS NOT NULL THEN
+        PERFORM requirement_transition(p_id, p_to_status_id);
+    END IF;
+    IF p_before_id IS NOT NULL OR p_after_id IS NOT NULL THEN
+        PERFORM requirement_reorder(p_id, p_before_id, p_after_id);
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+

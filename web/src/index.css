@@ -1,24 +1,105 @@
 @import "tailwindcss";
 
 @layer base {
+  :root {
+    --bg-page: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-surface-hover: #f1f5f9;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #64748b;
+    --border-color: #e2e8f0;
+    --accent-color: #4f46e5;
+  }
+
+  .dark {
+    --bg-page: #020617;
+    --bg-surface: #0f172a;
+    --bg-surface-hover: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --border-color: #1e293b;
+    --accent-color: #6366f1;
+  }
+
   body {
-    @apply bg-slate-950 text-slate-100 antialiased selection:bg-indigo-500/30 selection:text-indigo-200;
+    background-color: var(--bg-page);
+    color: var(--text-primary);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 }
 
-/* Custom scrollbar for dark modern theme */
+/* Base UI component adaptors for Light/Dark Theme */
+.light .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+.light .bg-slate-950\/60 {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+}
+.light .bg-slate-900 {
+  background-color: #ffffff !important;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+.light .bg-slate-900\/80,
+.light .bg-slate-900\/60 {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+}
+.light .bg-slate-800 {
+  background-color: #f1f5f9 !important;
+}
+.light .bg-slate-800\/30,
+.light .bg-slate-800\/50,
+.light .bg-slate-800\/80 {
+  background-color: rgba(241, 245, 249, 0.7) !important;
+}
+
+.light .text-slate-100,
+.light .text-slate-200 {
+  color: #0f172a !important;
+}
+.light .text-slate-300,
+.light .text-slate-400 {
+  color: #475569 !important;
+}
+.light .text-slate-500 {
+  color: #64748b !important;
+}
+.light .text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+.light .border-slate-800,
+.light .border-slate-800\/60,
+.light .border-slate-800\/80 {
+  border-color: #e2e8f0 !important;
+}
+.light .border-slate-700 {
+  border-color: #cbd5e1 !important;
+}
+
+.light .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #e2e8f0 !important;
+}
+
+/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.05);
+}
+.dark ::-webkit-scrollbar-track {
   background: rgba(15, 23, 42, 0.6);
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.6);
+  background: rgba(100, 116, 139, 0.3);
   border-radius: 9999px;
 }
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.6);
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(100, 116, 139, 0.8);
+  background: rgba(100, 116, 139, 0.5);
 }

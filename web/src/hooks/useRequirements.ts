@@ -37,8 +37,43 @@ export function useCreateRequirement(spaceId: string) {
       body_md?: string;
       priority_id: string;
       category_id?: string;
+      parent_id?: string;
     }) => api.post<Requirement>(`/spaces/${spaceId}/requirements`, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['requirements', spaceId] }),
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['requirements', spaceId] });
+      if (variables.parent_id) {
+        qc.invalidateQueries({ queryKey: ['requirements', variables.parent_id, 'children'] });
+      }
+    },
+  });
+}
+
+export function useUpdateRequirement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      ...data
+    }: {
+      id: string;
+      title?: string;
+      body_md?: string;
+      priority_id?: string;
+      category_id?: string;
+      milestone_id?: string;
+      done_ratio?: number;
+      estimated_hours?: number;
+      spent_hours?: number;
+      start_date?: string;
+      due_date?: string;
+    }) => api.patch<Requirement>(`/requirements/${id}`, data),
+    onSuccess: (req) => {
+      if (req && req.id) {
+        qc.setQueryData(['requirement', req.id], req);
+      }
+      qc.invalidateQueries({ queryKey: ['requirements'] });
+      qc.invalidateQueries({ queryKey: ['board'] });
+    },
   });
 }
 
@@ -63,3 +98,69 @@ export function useMoveCard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['board'] }),
   });
 }
+
+export function useMoveRequirement() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      new_status_id,
+      before_id,
+      after_id,
+    }: {
+      id: string;
+      new_status_id: string;
+      before_id?: string;
+      after_id?: string;
+    }) =>
+      api.patch<void>(`/requirements/${id}/move`, {
+        new_status_id,
+        before_id,
+        after_id,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['board'] });
+      qc.invalidateQueries({ queryKey: ['requirements'] });
+    },
+  });
+}
+
+export function useRequirementChildren(reqId: string) {
+  return useQuery({
+    queryKey: ['requirements', reqId, 'children'],
+    queryFn: () => api.get<Requirement[]>(`/requirements/${reqId}/children`),
+    enabled: !!reqId,
+  });
+}
+
+export function useRequirementLabels(reqId: string) {
+  return useQuery({
+    queryKey: ['requirements', reqId, 'labels'],
+    queryFn: () => api.get<{ id: string; name: string; color: string }[]>(`/requirements/${reqId}/labels`),
+    enabled: !!reqId,
+  });
+}
+
+export function useAddRequirementLabel(reqId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (label_id: string) =>
+      api.post(`/requirements/${reqId}/labels`, { label_id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['requirements', reqId, 'labels'] });
+    },
+  });
+}
+
+export function useRemoveRequirementLabel(reqId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (labelId: string) =>
+      api.delete(`/requirements/${reqId}/labels/${labelId}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['requirements', reqId, 'labels'] });
+    },
+  });
+}
+
+
