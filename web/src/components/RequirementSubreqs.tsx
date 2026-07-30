@@ -10,21 +10,21 @@ interface RequirementSubreqsProps {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  new:          'bg-slate-700/50 text-slate-400 border-slate-600/50',
-  triaged:      'bg-slate-700/50 text-slate-300 border-slate-600/50',
-  ready:        'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
-  in_analysis:  'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  in_progress:  'bg-violet-500/20 text-violet-300 border-violet-500/30',
-  in_review:    'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
-  resolved:     'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  closed:       'bg-slate-800 text-slate-500 border-slate-700/50',
+  new:          'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
+  triaged:      'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
+  ready:        'bg-[var(--status-ready-bg)] text-[var(--status-ready-text)] border-[var(--status-ready-text)]/30',
+  in_analysis:  'bg-[var(--status-analysis-bg)] text-[var(--status-analysis-text)] border-[var(--status-analysis-text)]/30',
+  in_progress:  'bg-[var(--status-progress-bg)] text-[var(--status-progress-text)] border-[var(--status-progress-text)]/30',
+  in_review:    'bg-[var(--status-review-bg)] text-[var(--status-review-text)] border-[var(--status-review-text)]/30',
+  resolved:     'bg-[var(--status-resolved-bg)] text-[var(--status-resolved-text)] border-[var(--status-resolved-text)]/30',
+  closed:       'bg-[var(--badge-neutral-dim-bg)] text-[var(--badge-neutral-dim-text)] border-[var(--badge-neutral-dim-text)]/30',
 };
 
 const PRIORITY_COLORS: Record<string, string> = {
-  urgent:    'bg-red-500/20 text-red-400 border-red-500/30',
-  high:      'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  normal:    'bg-slate-700/50 text-slate-300 border-slate-600/50',
-  low:       'bg-slate-800/50 text-slate-500 border-slate-700/50',
+  urgent:    'bg-[var(--priority-urgent-bg)] text-[var(--priority-urgent-text)] border-[var(--priority-urgent-text)]/30',
+  high:      'bg-[var(--priority-high-bg)] text-[var(--priority-high-text)] border-[var(--priority-high-text)]/30',
+  normal:    'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
+  low:       'bg-[var(--badge-neutral-dim-bg)] text-[var(--badge-neutral-dim-text)] border-[var(--badge-neutral-dim-text)]/30',
 };
 
 export default function RequirementSubreqs({ spaceId, reqId }: RequirementSubreqsProps) {
@@ -66,15 +66,15 @@ export default function RequirementSubreqs({ spaceId, reqId }: RequirementSubreq
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+      <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
         <div className="flex items-center gap-2">
-          <GitCommit className="h-4 w-4 text-indigo-400" />
-          <h3 className="text-sm font-semibold text-slate-200">Sub-requerimientos</h3>
-          <span className="text-xs text-slate-500 font-mono">({children.length})</span>
+          <GitCommit className="h-4 w-4 text-[var(--accent-text)]" />
+          <h3 className="text-sm font-semibold text-[var(--text-secondary)]">Sub-requerimientos</h3>
+          <span className="text-xs text-[var(--text-muted)] font-mono">({children.length})</span>
         </div>
         <button
           onClick={() => setShowForm(!showForm)}
-          className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-indigo-600/20 text-indigo-300 hover:bg-indigo-600/30 transition-colors"
+          className="flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-[var(--accent-soft)] text-[var(--accent-text)] hover:bg-[var(--accent-color)]/20 transition-colors"
         >
           <Plus className="h-3.5 w-3.5" />
           Nuevo Sub-requerimiento
@@ -84,28 +84,28 @@ export default function RequirementSubreqs({ spaceId, reqId }: RequirementSubreq
       {showForm && (
         <form
           onSubmit={handleCreate}
-          className="p-4 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-3"
+          className="p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-3"
         >
-          <h4 className="text-xs font-semibold text-slate-300">Crear Sub-requerimiento</h4>
+          <h4 className="text-xs font-semibold text-[var(--text-secondary)]">Crear Sub-requerimiento</h4>
           <div>
             <input
               type="text"
               placeholder="Título del sub-requerimiento..."
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              className="w-full rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="w-full rounded-md bg-[var(--bg-input)] border border-[var(--border-color)] px-3 py-1.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
             />
           </div>
 
           <div className="flex items-center gap-3">
             <div className="flex-1">
-              <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">
+              <label className="block text-[10px] uppercase font-semibold text-[var(--text-muted)] mb-1">
                 Tipo (Tracker)
               </label>
               <select
                 value={trackerId}
                 onChange={(e) => setTrackerId(e.target.value)}
-                className="w-full rounded-md bg-slate-800 border border-slate-700 px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full rounded-md bg-[var(--bg-input)] border border-[var(--border-color)] px-2 py-1 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
               >
                 {trackers.map((t) => (
                   <option key={t.id} value={t.id}>
@@ -116,13 +116,13 @@ export default function RequirementSubreqs({ spaceId, reqId }: RequirementSubreq
             </div>
 
             <div className="flex-1">
-              <label className="block text-[10px] uppercase font-semibold text-slate-400 mb-1">
+              <label className="block text-[10px] uppercase font-semibold text-[var(--text-muted)] mb-1">
                 Prioridad
               </label>
               <select
                 value={priorityId}
                 onChange={(e) => setPriorityId(e.target.value)}
-                className="w-full rounded-md bg-slate-800 border border-slate-700 px-2 py-1 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+                className="w-full rounded-md bg-[var(--bg-input)] border border-[var(--border-color)] px-2 py-1 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
               >
                 {priorities.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -137,14 +137,14 @@ export default function RequirementSubreqs({ spaceId, reqId }: RequirementSubreq
             <button
               type="button"
               onClick={() => setShowForm(false)}
-              className="px-3 py-1 text-xs text-slate-400 hover:text-slate-200"
+              className="px-3 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={createChild.isPending || !title.trim()}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md bg-[var(--accent-color)] text-[var(--text-inverted)] hover:bg-[var(--accent-color-hover)] disabled:opacity-50"
             >
               {createChild.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
               Crear Sub-requerimiento
@@ -154,31 +154,31 @@ export default function RequirementSubreqs({ spaceId, reqId }: RequirementSubreq
       )}
 
       {isLoading ? (
-        <p className="text-xs text-slate-500 italic">Cargando sub-requerimientos...</p>
+        <p className="text-xs text-[var(--text-muted)] italic">Cargando sub-requerimientos...</p>
       ) : children.length === 0 ? (
-        <p className="text-xs text-slate-500 italic">
+        <p className="text-xs text-[var(--text-muted)] italic">
           No hay sub-requerimientos definidos para este ítem.
         </p>
       ) : (
-        <div className="divide-y divide-slate-800/80 border border-slate-800/80 rounded-xl overflow-hidden bg-slate-900/40">
+        <div className="divide-y divide-[var(--border-color)] border border-[var(--border-color)] rounded-xl overflow-hidden bg-[var(--bg-surface)]">
           {children.map((child) => (
             <div
               key={child.id}
               onClick={() => navigate(`/spaces/${spaceId}/requirements/${child.id}`)}
-              className="flex items-center justify-between p-3 hover:bg-slate-800/40 cursor-pointer transition-colors"
+              className="flex items-center justify-between p-3 hover:bg-[var(--bg-surface-hover)] cursor-pointer transition-colors"
             >
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-xs font-mono font-bold text-indigo-400 px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/30 shrink-0">
+                <span className="text-xs font-mono font-bold text-[var(--accent-text)] px-1.5 py-0.5 rounded bg-[var(--accent-soft)] border border-[var(--accent-color)]/30 shrink-0">
                   {child.ref_key}
                 </span>
-                <span className="text-xs font-medium text-slate-200 truncate">{child.title}</span>
+                <span className="text-xs font-medium text-[var(--text-secondary)] truncate">{child.title}</span>
               </div>
 
               <div className="flex items-center gap-3 shrink-0">
-                <div className="flex items-center gap-1.5 text-xs font-mono text-slate-400">
-                  <div className="w-12 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div className="flex items-center gap-1.5 text-xs font-mono text-[var(--text-muted)]">
+                  <div className="w-12 bg-[var(--bg-surface-hover)] rounded-full h-1.5 overflow-hidden">
                     <div
-                      className="bg-indigo-500 h-1.5 rounded-full"
+                      className="bg-[var(--accent-color)] h-1.5 rounded-full"
                       style={{ width: `${child.done_ratio || 0}%` }}
                     />
                   </div>

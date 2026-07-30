@@ -13,6 +13,9 @@ type Config struct {
 	SecretKey      string   `env:"QG_SECRET_KEY,required"`
 	AllowedOrigins []string `env:"QG_ALLOWED_ORIGINS" envDefault:"*"`
 	Port           int      `env:"PORT" envDefault:"8080"`
+
+	StorageBackend string `env:"QG_STORAGE_BACKEND" envDefault:"fs"`
+	StoragePath    string `env:"QG_STORAGE_PATH" envDefault:"./data/attachments"`
 }
 
 func Load() (Config, error) {

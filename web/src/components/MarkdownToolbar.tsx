@@ -13,6 +13,7 @@ import {
   FileCode,
   Quote,
   Link as LinkIcon,
+  Image as ImageIcon,
   Table as TableIcon,
 } from 'lucide-react';
 
@@ -93,7 +94,7 @@ export default function MarkdownToolbar({
       type="button"
       title={title}
       onClick={() => handleAction({ label: title, prefix, suffix, defaultText })}
-      className="p-1.5 rounded hover:bg-slate-700/60 text-slate-400 hover:text-slate-100 transition-colors"
+      className="p-1.5 rounded hover:bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
     >
       {icon}
     </button>
@@ -101,24 +102,25 @@ export default function MarkdownToolbar({
 
   return (
     <div
-      className={`flex flex-wrap items-center gap-0.5 px-2 py-1 bg-slate-800/80 border border-slate-700/70 rounded-t-lg text-slate-300 ${className}`}
+      className={`flex flex-wrap items-center gap-0.5 px-2 py-1 bg-[var(--bg-surface-hover)] border border-[var(--border-color)] rounded-t-lg text-[var(--text-secondary)] ${className}`}
     >
       {btn(<Bold className="h-4 w-4" />, 'Negrita', '**', '**', 'negrita')}
       {btn(<Italic className="h-4 w-4" />, 'Cursiva', '*', '*', 'cursiva')}
-      <div className="h-4 w-px bg-slate-700 mx-1" />
+      <div className="h-4 w-px bg-[var(--border-color)] mx-1" />
       {btn(<Heading1 className="h-4 w-4" />, 'Título 1', '# ', '', 'Título 1')}
       {btn(<Heading2 className="h-4 w-4" />, 'Título 2', '## ', '', 'Título 2')}
       {btn(<Heading3 className="h-4 w-4" />, 'Título 3', '### ', '', 'Título 3')}
       {btn(<Heading4 className="h-4 w-4" />, 'Título 4', '#### ', '', 'Título 4')}
-      <div className="h-4 w-px bg-slate-700 mx-1" />
+      <div className="h-4 w-px bg-[var(--border-color)] mx-1" />
       {btn(<List className="h-4 w-4" />, 'Viñetas', '- ', '', 'ítem')}
       {btn(<ListOrdered className="h-4 w-4" />, 'Lista numerada', '1. ', '', 'ítem')}
       {btn(<CheckSquare className="h-4 w-4" />, 'Lista de tareas', '- [ ] ', '', 'tarea')}
-      <div className="h-4 w-px bg-slate-700 mx-1" />
+      <div className="h-4 w-px bg-[var(--border-color)] mx-1" />
       {btn(<Code className="h-4 w-4" />, 'Código inline', '`', '`', 'code')}
       {btn(<FileCode className="h-4 w-4" />, 'Bloque de código', '```\n', '\n```', 'código')}
       {btn(<Quote className="h-4 w-4" />, 'Cita', '> ', '', 'cita')}
       {btn(<LinkIcon className="h-4 w-4" />, 'Enlace', '[', '](https://)', 'título')}
+      {btn(<ImageIcon className="h-4 w-4" />, 'Imagen', '![', '](https://)', 'alt')}
       {btn(
         <TableIcon className="h-4 w-4" />,
         'Tabla',

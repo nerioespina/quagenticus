@@ -68,13 +68,13 @@ export default function LinkDocumentModal({
     >
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-xs font-medium text-slate-300 mb-1">
+          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
             Tipo de relación
           </label>
           <select
             value={linkType}
             onChange={(e) => setLinkType(e.target.value)}
-            className="w-full rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            className="w-full rounded-md bg-[var(--bg-input)] border border-[var(--border-color)] px-3 py-1.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
           >
             {linkOptions.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -85,25 +85,25 @@ export default function LinkDocumentModal({
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-300 mb-1">
+          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
             Buscar y seleccionar {filterType === 'requirement' ? 'requerimiento' : 'documento'}
           </label>
           <div className="relative mb-2">
-            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-slate-400" />
+            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-[var(--text-muted)]" />
             <input
               type="text"
               placeholder="Escribe para buscar..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-md bg-slate-800 border border-slate-700 pl-8 pr-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+              className="w-full rounded-md bg-[var(--bg-input)] border border-[var(--border-color)] pl-8 pr-3 py-1.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
             />
           </div>
 
-          <div className="max-h-48 overflow-y-auto border border-slate-700 rounded-md bg-slate-900/60 divide-y divide-slate-800">
+          <div className="max-h-48 overflow-y-auto border border-[var(--border-color)] rounded-md bg-[var(--bg-surface)] divide-y divide-[var(--border-color)]">
             {isLoading ? (
-              <p className="p-3 text-xs text-slate-400 text-center">Cargando lista...</p>
+              <p className="p-3 text-xs text-[var(--text-muted)] text-center">Cargando lista...</p>
             ) : filteredDocs.length === 0 ? (
-              <p className="p-3 text-xs text-slate-400 text-center">No se encontraron resultados.</p>
+              <p className="p-3 text-xs text-[var(--text-muted)] text-center">No se encontraron resultados.</p>
             ) : (
               filteredDocs.map((doc) => (
                 <div
@@ -111,15 +111,15 @@ export default function LinkDocumentModal({
                   onClick={() => setSelectedDocId(doc.id)}
                   className={`flex items-center justify-between p-2 cursor-pointer transition-colors ${
                     selectedDocId === doc.id
-                      ? 'bg-indigo-500/20 text-indigo-300'
-                      : 'hover:bg-slate-800 text-slate-300'
+                      ? 'bg-[var(--accent-soft)] text-[var(--accent-text)]'
+                      : 'hover:bg-[var(--bg-surface-hover)] text-[var(--text-secondary)]'
                   }`}
                 >
                   <div className="flex items-center gap-2 truncate">
-                    <LinkIcon className="h-3.5 w-3.5 flex-shrink-0 text-slate-400" />
+                    <LinkIcon className="h-3.5 w-3.5 flex-shrink-0 text-[var(--text-muted)]" />
                     <span className="text-xs font-medium truncate">{doc.title}</span>
                   </div>
-                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-[var(--bg-surface-hover)] text-[var(--text-muted)]">
                     {doc.doc_type}
                   </span>
                 </div>
@@ -129,7 +129,7 @@ export default function LinkDocumentModal({
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-300 mb-1">
+          <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1">
             Nota o comentario (opcional)
           </label>
           <input
@@ -137,22 +137,22 @@ export default function LinkDocumentModal({
             placeholder="Añade un comentario sobre este enlace..."
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            className="w-full rounded-md bg-slate-800 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            className="w-full rounded-md bg-[var(--bg-input)] border border-[var(--border-color)] px-3 py-1.5 text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[var(--accent-color)]"
           />
         </div>
 
-        <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <div className="flex justify-end gap-2 pt-2 border-t border-[var(--border-color)]">
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-1.5 text-xs text-slate-300 hover:text-white"
+            className="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
           >
             Cancelar
           </button>
           <button
             type="submit"
             disabled={!selectedDocId}
-            className="px-3 py-1.5 text-xs font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 text-xs font-medium rounded-md bg-[var(--accent-color)] text-[var(--text-inverted)] hover:bg-[var(--accent-color-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Vincular
           </button>

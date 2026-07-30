@@ -113,6 +113,16 @@ func (h *Requirements) Create(w http.ResponseWriter, r *http.Request) {
 		).Scan(&docID); err != nil {
 			return err
 		}
+		if in.MilestoneID != nil || in.ParentID != nil {
+			if _, err := tx.Exec(r.Context(), `
+				UPDATE requirement SET
+					milestone_id = COALESCE($2, milestone_id),
+					parent_id    = COALESCE($3, parent_id)
+				WHERE document_id = $1
+			`, docID, in.MilestoneID, in.ParentID); err != nil {
+				return err
+			}
+		}
 		return tx.QueryRow(r.Context(), `
 			SELECT r.document_id, d.space_id, r.account_id, d.ref_key,
 			       d.title, d.body_md,

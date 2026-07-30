@@ -37,6 +37,7 @@ export function useCreateRequirement(spaceId: string) {
       body_md?: string;
       priority_id: string;
       category_id?: string;
+      milestone_id?: string;
       parent_id?: string;
     }) => api.post<Requirement>(`/spaces/${spaceId}/requirements`, data),
     onSuccess: (_, variables) => {

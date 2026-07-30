@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
@@ -13,19 +15,16 @@ import (
 	"github.com/nespina/quagenticus/internal/db"
 	"github.com/nespina/quagenticus/internal/httpx"
 	"github.com/nespina/quagenticus/internal/models"
+	"github.com/nespina/quagenticus/internal/storage"
 )
 
 type Attachments struct {
-	db        *db.DB
-	uploadDir string
+	db      *db.DB
+	storage storage.Storage
 }
 
-func NewAttachments(db *db.DB, uploadDir string) *Attachments {
-	if uploadDir == "" {
-		uploadDir = "/tmp/quagenticus_uploads"
-	}
-	os.MkdirAll(uploadDir, 0755) //nolint:errcheck
-	return &Attachments{db: db, uploadDir: uploadDir}
+func NewAttachments(db *db.DB, store storage.Storage) *Attachments {
+	return &Attachments{db: db, storage: store}
 }
 
 func (h *Attachments) ListByRequirement(w http.ResponseWriter, r *http.Request) {
@@ -86,13 +85,6 @@ func (h *Attachments) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hash := sha256.Sum256(data)
-	hashHex := fmt.Sprintf("%x", hash)
-	storageKey := filepath.Join(h.uploadDir, hashHex)
-
-	if err := os.WriteFile(storageKey, data, 0644); err != nil {
-		http.Error(w, "failed to store file", http.StatusInternalServerError)
-		return
-	}
 
 	var accountID string
 	err = h.db.Pool.QueryRow(r.Context(), `SELECT account_id FROM document WHERE id = $1`, reqID).Scan(&accountID)
@@ -104,6 +96,18 @@ func (h *Attachments) Upload(w http.ResponseWriter, r *http.Request) {
 	contentType := header.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+
+	randBytes := make([]byte, 16)
+	if _, err := rand.Read(randBytes); err != nil {
+		http.Error(w, "failed to generate storage key", http.StatusInternalServerError)
+		return
+	}
+	storageKey := fmt.Sprintf("%s/%s/%s%s", accountID, reqID, hex.EncodeToString(randBytes), filepath.Ext(header.Filename))
+
+	if err := h.storage.Put(storageKey, bytes.NewReader(data), contentType); err != nil {
+		http.Error(w, "failed to store file", http.StatusInternalServerError)
+		return
 	}
 
 	var a models.AttachmentResponse
@@ -126,13 +130,17 @@ func (h *Attachments) Delete(w http.ResponseWriter, r *http.Request) {
 	reqID := chi.URLParam(r, "id")
 	attachID := chi.URLParam(r, "attachId")
 
-	_, err := h.db.Pool.Exec(r.Context(), `
+	var storageKey string
+	err := h.db.Pool.QueryRow(r.Context(), `
 		DELETE FROM attachment WHERE id = $1 AND document_id = $2
-	`, attachID, reqID)
+		RETURNING storage_key
+	`, attachID, reqID).Scan(&storageKey)
 	if err != nil {
 		httpx.RespondError(w, err)
 		return
 	}
+
+	h.storage.Delete(storageKey) //nolint:errcheck
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -155,7 +163,7 @@ func (h *Attachments) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	f, err := os.Open(storageKey)
+	f, err := h.storage.Get(storageKey)
 	if err != nil {
 		http.Error(w, "file not found on server", http.StatusNotFound)
 		return

@@ -17,6 +17,7 @@ import (
 	"github.com/nespina/quagenticus/internal/db"
 	"github.com/nespina/quagenticus/internal/handlers"
 	"github.com/nespina/quagenticus/internal/httpx"
+	"github.com/nespina/quagenticus/internal/storage"
 )
 
 func main() {
@@ -43,7 +44,8 @@ func main() {
 	boardsH := handlers.NewBoards(database)
 	journalsH := handlers.NewJournals(database)
 	linksH := handlers.NewLinks(database)
-	attachmentsH := handlers.NewAttachments(database, "")
+	store := storage.NewLocal(cfg.StoragePath)
+	attachmentsH := handlers.NewAttachments(database, store)
 	milestonesH := handlers.NewMilestones(database)
 	categoriesH := handlers.NewCategories(database)
 

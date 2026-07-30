@@ -27,10 +27,10 @@ interface Context {
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
-  urgent: 'bg-red-500/20 text-red-400 border-red-500/30',
-  high:   'bg-orange-500/20 text-orange-400 border-orange-500/30',
-  normal: 'bg-slate-700/50 text-slate-300 border-slate-600/50',
-  low:    'bg-slate-800/50 text-slate-500 border-slate-700/50',
+  urgent: 'bg-[var(--priority-urgent-bg)] text-[var(--priority-urgent-text)] border-[var(--priority-urgent-text)]/30',
+  high:   'bg-[var(--priority-high-bg)] text-[var(--priority-high-text)] border-[var(--priority-high-text)]/30',
+  normal: 'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
+  low:    'bg-[var(--badge-neutral-dim-bg)] text-[var(--badge-neutral-dim-text)] border-[var(--badge-neutral-dim-text)]/30',
 };
 
 function SortableCard({
@@ -63,8 +63,8 @@ function SortableCard({
       ref={setNodeRef}
       style={style}
       onClick={() => navigate(`/spaces/${spaceId}/requirements/${card.id}`)}
-      className={`bg-slate-900 border border-slate-800/80 hover:border-indigo-500/40 rounded-xl p-3.5 space-y-2.5 cursor-pointer transition-all shadow-sm hover:shadow-indigo-500/5 group ${
-        isDragging ? 'opacity-40 border-indigo-500 border-dashed bg-slate-800/50' : ''
+      className={`bg-[var(--bg-surface)] border border-[var(--border-color)] hover:border-[var(--accent-color)]/40 rounded-xl p-3.5 space-y-2.5 cursor-pointer transition-all shadow-[var(--shadow-sm)] group ${
+        isDragging ? 'opacity-40 border-[var(--accent-color)] border-dashed bg-[var(--bg-surface-hover)]' : ''
       }`}
     >
       <div className="flex items-center justify-between gap-2">
@@ -73,13 +73,13 @@ function SortableCard({
             {...attributes}
             {...listeners}
             onClick={e => e.stopPropagation()}
-            className="cursor-grab active:cursor-grabbing p-0.5 -ml-1 text-slate-600 hover:text-slate-400"
+            className="cursor-grab active:cursor-grabbing p-0.5 -ml-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             title="Arrastrar tarjeta"
           >
             <GripVertical className="h-3.5 w-3.5" />
           </div>
           {card.ref_key && (
-            <span className="text-xs font-mono font-semibold text-indigo-400 group-hover:text-indigo-300 shrink-0">
+            <span className="text-xs font-mono font-semibold text-[var(--accent-text)] shrink-0">
               {card.ref_key}
             </span>
           )}
@@ -92,9 +92,9 @@ function SortableCard({
           {card.priority_name || card.priority_id}
         </span>
       </div>
-      <p className="text-sm text-slate-200 font-medium leading-snug">{card.title}</p>
-      <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/60 text-xs text-slate-500">
-        <CheckCircle2 className="h-3.5 w-3.5 text-slate-600" />
+      <p className="text-sm text-[var(--text-secondary)] font-medium leading-snug">{card.title}</p>
+      <div className="flex items-center justify-between pt-1.5 border-t border-[var(--border-color)] text-xs text-[var(--text-muted)]">
+        <CheckCircle2 className="h-3.5 w-3.5 text-[var(--text-muted)]" />
         <span className="font-mono">{new Date(card.updated_at).toLocaleDateString('es')}</span>
       </div>
     </div>
@@ -118,19 +118,19 @@ function DroppableColumn({
   return (
     <div
       ref={setNodeRef}
-      className={`bg-slate-900/50 border rounded-xl p-4 flex flex-col gap-3 min-w-[280px] w-72 shrink-0 transition-colors ${
-        isOver ? 'border-indigo-500/60 bg-slate-900/80' : 'border-slate-800/60'
+      className={`bg-[var(--bg-surface)]/60 border rounded-xl p-4 flex flex-col gap-3 min-w-[280px] w-72 shrink-0 transition-colors ${
+        isOver ? 'border-[var(--accent-color)]/60 bg-[var(--bg-surface)]' : 'border-[var(--border-color)]'
       }`}
     >
-      <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+      <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
         <div className="flex items-center gap-2">
           {column.color && (
             <div className="h-2 w-2 rounded-full" style={{ background: column.color }} />
           )}
-          <span className="text-sm font-semibold text-slate-200">{column.name}</span>
+          <span className="text-sm font-semibold text-[var(--text-secondary)]">{column.name}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">
+          <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-[var(--bg-surface-hover)] text-[var(--text-muted)]">
             {cards.length}
             {column.wip_limit ? `/${column.wip_limit}` : ''}
           </span>
@@ -145,7 +145,7 @@ function DroppableColumn({
         </div>
       </SortableContext>
 
-      <button className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-slate-600 hover:text-slate-400 hover:bg-slate-800/50 text-xs transition-all w-full">
+      <button className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] text-xs transition-all w-full">
         <Plus className="h-3.5 w-3.5" />
         Agregar
       </button>
@@ -247,16 +247,16 @@ export default function Board() {
   };
 
   if (loadingBoards) {
-    return <div className="p-6 text-slate-500 text-sm">Cargando tableros…</div>;
+    return <div className="p-6 text-[var(--text-muted)] text-sm">Cargando tableros…</div>;
   }
 
   if (boards.length === 0) {
     return (
       <div className="p-6 space-y-4">
-        <h2 className="text-xl font-bold text-slate-100">Tablero Kanban</h2>
-        <div className="p-8 text-center text-slate-500 text-sm border border-dashed border-slate-800 rounded-xl">
+        <h2 className="text-xl font-bold text-[var(--text-primary)]">Tablero Kanban</h2>
+        <div className="p-8 text-center text-[var(--text-muted)] text-sm border border-dashed border-[var(--border-color)] rounded-xl">
           <p>No hay tableros en este espacio.</p>
-          <p className="mt-1 text-xs text-slate-600">Crea uno desde la configuración del espacio.</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Crea uno desde la configuración del espacio.</p>
         </div>
       </div>
     );
@@ -266,14 +266,14 @@ export default function Board() {
     <div className="p-6 space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-slate-100">Tablero Kanban</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <h2 className="text-xl font-bold text-[var(--text-primary)]">Tablero Kanban</h2>
+          <p className="text-xs text-[var(--text-muted)] mt-0.5">
             Arrastra tarjetas para priorizar en columna o cambiar de estado (#3)
           </p>
         </div>
         <div className="flex items-center gap-3">
           {moveReq.isPending && (
-            <span className="text-xs text-indigo-400 flex items-center gap-1.5 bg-indigo-500/10 px-2.5 py-1 rounded-md border border-indigo-500/20">
+            <span className="text-xs text-[var(--accent-text)] flex items-center gap-1.5 bg-[var(--accent-soft)] px-2.5 py-1 rounded-md border border-[var(--accent-color)]/20">
               <Loader2 className="h-3 w-3 animate-spin" />
               Actualizando posición...
             </span>
@@ -282,7 +282,7 @@ export default function Board() {
             <select
               value={activeBoardId}
               onChange={e => setBoardId(e.target.value)}
-              className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none"
+              className="bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-secondary)] focus:outline-none"
             >
               {boards.map(b => (
                 <option key={b.id} value={b.id}>
@@ -294,7 +294,7 @@ export default function Board() {
           <button
             onClick={() => refetch()}
             disabled={isFetching}
-            className="p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 transition-all disabled:opacity-50"
+            className="p-2 rounded-lg bg-[var(--bg-input)] border border-[var(--border-color)] hover:border-[var(--text-muted)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-all disabled:opacity-50"
             title="Refrescar tablero"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? 'animate-spin' : ''}`} />
@@ -303,7 +303,7 @@ export default function Board() {
       </div>
 
       {isLoading ? (
-        <div className="text-slate-500 text-sm">Cargando tablero…</div>
+        <div className="text-[var(--text-muted)] text-sm">Cargando tablero…</div>
       ) : board ? (
         <DndContext
           sensors={sensors}
@@ -333,9 +333,9 @@ export default function Board() {
 
           <DragOverlay>
             {activeDragCard ? (
-              <div className="bg-slate-900 border border-indigo-500/60 rounded-xl p-3.5 space-y-2.5 shadow-xl w-72 rotate-2 opacity-95">
+              <div className="bg-[var(--bg-surface)] border border-[var(--accent-color)]/60 rounded-xl p-3.5 space-y-2.5 shadow-[var(--shadow-md)] w-72 rotate-2 opacity-95">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-mono font-semibold text-indigo-400">
+                  <span className="text-xs font-mono font-semibold text-[var(--accent-text)]">
                     {activeDragCard.ref_key}
                   </span>
                   <span
@@ -346,7 +346,7 @@ export default function Board() {
                     {activeDragCard.priority_name || activeDragCard.priority_id}
                   </span>
                 </div>
-                <p className="text-sm text-slate-200 font-medium leading-snug">
+                <p className="text-sm text-[var(--text-secondary)] font-medium leading-snug">
                   {activeDragCard.title}
                 </p>
               </div>
@@ -354,7 +354,7 @@ export default function Board() {
           </DragOverlay>
         </DndContext>
       ) : (
-        <div className="text-slate-500 text-sm">Selecciona un tablero.</div>
+        <div className="text-[var(--text-muted)] text-sm">Selecciona un tablero.</div>
       )}
     </div>
   );

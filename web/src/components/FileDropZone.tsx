@@ -49,8 +49,8 @@ export default function FileDropZone({ onUpload, isUploading = false }: FileDrop
       onClick={() => !isUploading && fileInputRef.current?.click()}
       className={`relative flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
         isDragging
-          ? 'border-indigo-500 bg-indigo-500/10 text-indigo-300'
-          : 'border-slate-700 hover:border-slate-500 bg-slate-900/40 text-slate-400 hover:text-slate-200'
+          ? 'border-[var(--accent-color)] bg-[var(--accent-soft)] text-[var(--accent-text)]'
+          : 'border-[var(--border-color)] hover:border-[var(--text-muted)] bg-[var(--bg-surface)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
       } ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
     >
       <input
@@ -62,16 +62,16 @@ export default function FileDropZone({ onUpload, isUploading = false }: FileDrop
       />
       {isUploading ? (
         <div className="flex items-center gap-2 text-xs">
-          <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
+          <Loader2 className="h-4 w-4 animate-spin text-[var(--accent-text)]" />
           <span>Subiendo archivo...</span>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-1 text-center">
-          <UploadCloud className="h-6 w-6 text-slate-400" />
+          <UploadCloud className="h-6 w-6 text-[var(--text-muted)]" />
           <p className="text-xs font-medium">
-            Arrastra archivos aquí o <span className="text-indigo-400 underline">haz clic para seleccionar</span>
+            Arrastra archivos aquí o <span className="text-[var(--accent-text)] underline">haz clic para seleccionar</span>
           </p>
-          <span className="text-[10px] text-slate-500">Máx. 10 MB (imágenes, PDF, documentos)</span>
+          <span className="text-[10px] text-[var(--text-muted)]">Máx. 10 MB (imágenes, PDF, documentos)</span>
         </div>
       )}
     </div>

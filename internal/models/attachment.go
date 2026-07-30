@@ -8,6 +8,6 @@ type AttachmentResponse struct {
 	Filename    string    `json:"filename"`
 	ContentType string    `json:"content_type"`
 	ByteSize    int64     `json:"byte_size"`
-	StorageKey  string    `json:"storage_key"`
+	StorageKey  string    `json:"-"`
 	CreatedAt   time.Time `json:"created_at"`
 }

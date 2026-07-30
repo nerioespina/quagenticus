@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/nespina/quagenticus/internal/auth"
 	"github.com/nespina/quagenticus/internal/db"
 	"github.com/nespina/quagenticus/internal/httpx"
 	"github.com/nespina/quagenticus/internal/models"
@@ -69,6 +71,7 @@ func (h *Links) Create(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing requirement id", http.StatusBadRequest)
 		return
 	}
+	actor := auth.ActorFrom(r.Context())
 
 	var req models.CreateDocumentLinkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -83,19 +86,34 @@ func (h *Links) Create(w http.ResponseWriter, r *http.Request) {
 		req.LinkType = "relates"
 	}
 
+	// PostgreSQL MVCC: a JOIN in the same statement as a data-modifying function
+	// can't see the rows that function just inserted (same snapshot). Use two
+	// separate statements within the same transaction instead.
 	var l models.DocumentLinkResponse
-	err := h.db.Pool.QueryRow(r.Context(), `
-		INSERT INTO document_link (source_id, target_id, link_type, note, is_derived)
-		VALUES ($1, $2, $3, $4, false)
-		RETURNING id, source_id, target_id,
-		          (SELECT title FROM document WHERE id = $2),
-		          (SELECT slug FROM document WHERE id = $2),
-		          (SELECT doc_type::text FROM document WHERE id = $2),
-		          link_type::text, COALESCE(note, ''), created_at
-	`, reqID, req.TargetID, req.LinkType, req.Note).Scan(
-		&l.ID, &l.SourceID, &l.TargetID, &l.TargetTitle,
-		&l.TargetSlug, &l.TargetType, &l.LinkType, &l.Note, &l.CreatedAt,
-	)
+	err := h.db.WithActor(r.Context(), actor, func(tx pgx.Tx) error {
+		var linkID string
+		if err := tx.QueryRow(r.Context(),
+			`SELECT id FROM document_link_create($1, $2, $3, $4)`,
+			reqID, req.TargetID, req.LinkType, req.Note,
+		).Scan(&linkID); err != nil {
+			return err
+		}
+		return tx.QueryRow(r.Context(), `
+			SELECT dl.id, dl.source_id, dl.target_id,
+			       COALESCE(d.title, 'Documento'),
+			       COALESCE(d.slug, ''),
+			       d.doc_type::text,
+			       dl.link_type::text,
+			       COALESCE(dl.note, ''),
+			       dl.created_at
+			FROM document_link dl
+			JOIN document d ON d.id = dl.target_id
+			WHERE dl.id = $1
+		`, linkID).Scan(
+			&l.ID, &l.SourceID, &l.TargetID, &l.TargetTitle,
+			&l.TargetSlug, &l.TargetType, &l.LinkType, &l.Note, &l.CreatedAt,
+		)
+	})
 	if err != nil {
 		httpx.RespondError(w, err)
 		return

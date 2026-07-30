@@ -28,27 +28,27 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[var(--bg-page)] flex items-center justify-center p-4">
       <div className="w-full max-w-sm space-y-8">
         <div className="flex flex-col items-center gap-3">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-tr from-indigo-600 via-violet-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Layers className="h-7 w-7 text-white" />
+          <div className="h-14 w-14 rounded-2xl bg-[var(--accent-color)] flex items-center justify-center shadow-[var(--shadow-md)]">
+            <Layers className="h-7 w-7 text-[var(--text-inverted)]" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-white">Quagenticus</h1>
-            <p className="text-sm text-slate-400 mt-1">Gestión de requisitos con agentes IA</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)]">Quagenticus</h1>
+            <p className="text-sm text-[var(--text-muted)] mt-1">Gestión de requisitos con agentes IA</p>
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+            <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm">
               {error}
             </div>
           )}
 
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400" htmlFor="email">
+            <label className="block text-xs font-medium text-[var(--text-muted)]" htmlFor="email">
               Correo electrónico
             </label>
             <input
@@ -58,13 +58,13 @@ export default function Login() {
               required
               value={email}
               onChange={e => setEmail(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-color)]/60 transition-colors"
               placeholder="usuario@empresa.com"
             />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-medium text-slate-400" htmlFor="password">
+            <label className="block text-xs font-medium text-[var(--text-muted)]" htmlFor="password">
               Contraseña
             </label>
             <input
@@ -74,7 +74,7 @@ export default function Login() {
               required
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500/60 transition-colors"
+              className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-4 py-2.5 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-color)]/60 transition-colors"
               placeholder="••••••••"
             />
           </div>
@@ -82,7 +82,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-800 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors"
+            className="w-full py-2.5 rounded-lg bg-[var(--accent-color)] hover:bg-[var(--accent-color-hover)] disabled:opacity-60 disabled:cursor-not-allowed text-[var(--text-inverted)] text-sm font-semibold transition-colors"
           >
             {loading ? 'Iniciando sesión…' : 'Iniciar sesión'}
           </button>
