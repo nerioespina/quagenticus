@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-playground/validator/v10"
@@ -302,6 +303,78 @@ func (h *Documents) Labels(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.RespondJSON(w, http.StatusOK, list)
 }
+
+func (h *Documents) SpaceLabels(w http.ResponseWriter, r *http.Request) {
+	spaceID := chi.URLParam(r, "spaceId")
+	actor := auth.ActorFrom(r.Context())
+
+	type labelRow struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+
+	rows, err := h.db.Pool.Query(r.Context(), `
+		SELECT id, name, color FROM label
+		WHERE space_id = $1 OR (space_id IS NULL AND account_id = $2)
+		ORDER BY name
+	`, spaceID, actor.AccountID)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	defer rows.Close()
+
+	list := make([]labelRow, 0)
+	for rows.Next() {
+		var l labelRow
+		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
+			httpx.RespondError(w, err)
+			return
+		}
+		list = append(list, l)
+	}
+	httpx.RespondJSON(w, http.StatusOK, list)
+}
+
+func (h *Documents) CreateSpaceLabel(w http.ResponseWriter, r *http.Request) {
+	spaceID := chi.URLParam(r, "spaceId")
+	actor := auth.ActorFrom(r.Context())
+
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, "invalid json or missing name", http.StatusBadRequest)
+		return
+	}
+	if req.Color == "" {
+		req.Color = "blue"
+	}
+
+	slug := strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
+
+	type labelRow struct {
+		ID    string `json:"id"`
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+
+	var l labelRow
+	err := h.db.Pool.QueryRow(r.Context(), `
+		INSERT INTO label (account_id, space_id, name, slug, color, creator_id)
+		VALUES ($1, $2, $3, $4, $5::label_color, $6)
+		RETURNING id, name, color::text
+	`, actor.AccountID, spaceID, req.Name, slug, req.Color, actor.ID).Scan(&l.ID, &l.Name, &l.Color)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+
+	httpx.RespondJSON(w, http.StatusCreated, l)
+}
+
 
 func (h *Documents) Statuses(w http.ResponseWriter, r *http.Request) {
 	actor := auth.ActorFrom(r.Context())

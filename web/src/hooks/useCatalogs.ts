@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { Priority, WorkflowStatus, Label, Milestone, Category } from '../lib/api';
 
@@ -38,6 +38,26 @@ export function useLabels() {
   });
 }
 
+export function useSpaceLabels(spaceId: string) {
+  return useQuery({
+    queryKey: ['space-labels', spaceId],
+    queryFn: () => api.get<Label[]>(`/spaces/${spaceId}/labels`),
+    enabled: !!spaceId,
+  });
+}
+
+export function useCreateSpaceLabel(spaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; color: string }) =>
+      api.post<Label>(`/spaces/${spaceId}/labels`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['space-labels', spaceId] });
+      qc.invalidateQueries({ queryKey: ['labels'] });
+    },
+  });
+}
+
 export function useMilestones(spaceId: string) {
   return useQuery({
     queryKey: ['milestones', spaceId],
@@ -46,10 +66,32 @@ export function useMilestones(spaceId: string) {
   });
 }
 
+export function useCreateMilestone(spaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; description?: string; due_date?: string; status?: string }) =>
+      api.post<Milestone>(`/spaces/${spaceId}/milestones`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['milestones', spaceId] });
+    },
+  });
+}
+
 export function useCategories(spaceId: string) {
   return useQuery({
     queryKey: ['categories', spaceId],
     queryFn: () => api.get<Category[]>(`/spaces/${spaceId}/categories`),
     enabled: !!spaceId,
+  });
+}
+
+export function useCreateCategory(spaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { name: string; description?: string }) =>
+      api.post<Category>(`/spaces/${spaceId}/categories`, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['categories', spaceId] });
+    },
   });
 }

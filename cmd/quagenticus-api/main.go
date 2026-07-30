@@ -48,6 +48,7 @@ func main() {
 	attachmentsH := handlers.NewAttachments(database, store)
 	milestonesH := handlers.NewMilestones(database)
 	categoriesH := handlers.NewCategories(database)
+	usersH := handlers.NewUsers(database)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -71,12 +72,25 @@ func main() {
 			r.Use(auth.RequireAuth)
 
 			r.Get("/auth/me", authH.Me)
+			r.Patch("/auth/password", usersH.ChangeOwnPassword)
+
+			// System Users
+			r.Get("/users", usersH.List)
+			r.Post("/users", usersH.Create)
+			r.Patch("/users/{id}", usersH.Update)
+			r.Patch("/users/{id}/password", usersH.ChangePassword)
 
 			// Spaces
 			r.Get("/spaces", spacesH.List)
 			r.Post("/spaces", spacesH.Create)
 			r.Get("/spaces/{spaceId}", spacesH.Get)
 			r.Get("/spaces/{spaceId}/members", spacesH.ListMembers)
+			r.Post("/spaces/{spaceId}/members", spacesH.AddMember)
+			r.Patch("/spaces/{spaceId}/members/{userId}", spacesH.UpdateMember)
+			r.Delete("/spaces/{spaceId}/members/{userId}", spacesH.RemoveMember)
+			r.Get("/spaces/{spaceId}/labels", docsH.SpaceLabels)
+			r.Post("/spaces/{spaceId}/labels", docsH.CreateSpaceLabel)
+
 
 			// Documents (nested under space)
 			r.Get("/spaces/{spaceId}/documents", docsH.List)

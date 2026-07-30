@@ -154,3 +154,82 @@ func (h *Spaces) ListMembers(w http.ResponseWriter, r *http.Request) {
 	httpx.RespondJSON(w, http.StatusOK, members)
 }
 
+type AddSpaceMemberRequest struct {
+	UserID string `json:"user_id" validate:"required,uuid"`
+	Role   string `json:"role" validate:"required,oneof=admin maintainer contributor viewer"`
+}
+
+func (h *Spaces) AddMember(w http.ResponseWriter, r *http.Request) {
+	spaceID := chi.URLParam(r, "spaceId")
+	actor := auth.ActorFrom(r.Context())
+
+	var in AddSpaceMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
+		return
+	}
+	if err := validate.Struct(in); err != nil {
+		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: err.Error()})
+		return
+	}
+
+	_, err := h.db.Pool.Exec(r.Context(), `
+		INSERT INTO space_member (space_id, subject_type, subject_id, role, granted_by)
+		VALUES ($1, 'user', $2, $3::member_role, $4)
+		ON CONFLICT (space_id, subject_type, subject_id) DO UPDATE SET role = $3::member_role
+	`, spaceID, in.UserID, in.Role, actor.ID)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type UpdateSpaceMemberRequest struct {
+	Role string `json:"role" validate:"required,oneof=admin maintainer contributor viewer"`
+}
+
+func (h *Spaces) UpdateMember(w http.ResponseWriter, r *http.Request) {
+	spaceID := chi.URLParam(r, "spaceId")
+	userID := chi.URLParam(r, "userId")
+
+	var in UpdateSpaceMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
+		return
+	}
+	if err := validate.Struct(in); err != nil {
+		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: err.Error()})
+		return
+	}
+
+	_, err := h.db.Pool.Exec(r.Context(), `
+		UPDATE space_member SET role = $3::member_role
+		WHERE space_id = $1 AND subject_id = $2 AND subject_type = 'user'
+	`, spaceID, userID, in.Role)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Spaces) RemoveMember(w http.ResponseWriter, r *http.Request) {
+	spaceID := chi.URLParam(r, "spaceId")
+	userID := chi.URLParam(r, "userId")
+
+	_, err := h.db.Pool.Exec(r.Context(), `
+		DELETE FROM space_member
+		WHERE space_id = $1 AND subject_id = $2 AND subject_type = 'user'
+	`, spaceID, userID)
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+

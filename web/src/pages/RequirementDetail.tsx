@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -8,13 +8,19 @@ import {
   FileText,
   Link2,
   GitCommit,
+  Edit2,
+  Save,
+  X,
+  Lock,
 } from 'lucide-react';
-import { useRequirement } from '../hooks/useRequirements';
+import { useRequirement, useTransitionRequirement, useUpdateRequirement } from '../hooks/useRequirements';
+import { useStatuses, usePriorities } from '../hooks/useCatalogs';
 import MemberManager from '../components/MemberManager';
 import CommentSection from '../components/CommentSection';
 import RequirementAttachments from '../components/RequirementAttachments';
 import RequirementSubreqs from '../components/RequirementSubreqs';
 import RequirementSidebarExtras from '../components/RequirementSidebarExtras';
+import MarkdownToolbar from '../components/MarkdownToolbar';
 
 const STATUS_COLORS: Record<string, string> = {
   new:          'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
@@ -59,8 +65,28 @@ export default function RequirementDetail() {
   const { spaceId = '', reqId = '' } = useParams<{ spaceId: string; reqId: string }>();
   const navigate = useNavigate();
   const { data: req, isLoading } = useRequirement(reqId);
+  const { data: statuses = [] } = useStatuses();
+  const { data: priorities = [] } = usePriorities();
+
+  const transitionReq = useTransitionRequirement();
+  const updateReq = useUpdateRequirement();
 
   const [activeTab, setActiveTab] = useState<'description' | 'comments' | 'attachments' | 'subrequirements'>('description');
+
+  // Edit states
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState('');
+
+  const [isEditingBody, setIsEditingBody] = useState(false);
+  const [bodyValue, setBodyValue] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (req) {
+      setTitleValue(req.title);
+      setBodyValue(req.body_md);
+    }
+  }, [req]);
 
   if (isLoading) {
     return (
@@ -84,6 +110,29 @@ export default function RequirementDetail() {
     );
   }
 
+  const isClosed =
+    req.status_key === 'closed' ||
+    req.status_key === 'resolved' ||
+    req.status_key === 'discarded';
+
+  const handleSaveTitle = () => {
+    if (!titleValue.trim() || titleValue.trim() === req.title) {
+      setIsEditingTitle(false);
+      return;
+    }
+    updateReq.mutate(
+      { id: req.id, title: titleValue.trim() },
+      { onSuccess: () => setIsEditingTitle(false) }
+    );
+  };
+
+  const handleSaveBody = () => {
+    updateReq.mutate(
+      { id: req.id, body_md: bodyValue },
+      { onSuccess: () => setIsEditingBody(false) }
+    );
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Top Bar */}
@@ -99,22 +148,107 @@ export default function RequirementDetail() {
             <span className="text-sm font-mono font-bold text-[var(--accent-text)] px-2 py-0.5 rounded bg-[var(--accent-soft)] border border-[var(--accent-color)]/30">
               {req.ref_key}
             </span>
-            <span className={`px-2.5 py-0.5 rounded-md text-xs font-semibold uppercase tracking-wider border ${STATUS_COLORS[req.status_key] ?? STATUS_COLORS.new}`}>
-              {req.status_name || req.status_key}
-            </span>
-            <span className={`px-2.5 py-0.5 rounded-md text-xs font-semibold uppercase tracking-wider border ${PRIORITY_COLORS[req.priority_key] ?? PRIORITY_COLORS.normal}`}>
-              {req.priority_name || req.priority_key}
-            </span>
+
+            {/* Status Transition Selector (Punto 1) */}
+            <div className="flex items-center gap-1">
+              <label className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider hidden sm:inline">
+                Estado:
+              </label>
+              <select
+                value={req.status_id}
+                onChange={(e) =>
+                  transitionReq.mutate({ id: req.id, to_status_id: e.target.value })
+                }
+                disabled={transitionReq.isPending}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border cursor-pointer focus:outline-none ${
+                  STATUS_COLORS[req.status_key] ?? STATUS_COLORS.new
+                }`}
+              >
+                {statuses.map((s) => (
+                  <option key={s.id} value={s.id} className="bg-[var(--bg-surface)] text-[var(--text-primary)] font-normal uppercase">
+                    {s.name} {s.is_closed ? '(Cerrado)' : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Priority Selector (Punto 2) */}
+            <div className="flex items-center gap-1">
+              <select
+                value={req.priority_id}
+                disabled={isClosed || updateReq.isPending}
+                onChange={(e) =>
+                  updateReq.mutate({ id: req.id, priority_id: e.target.value })
+                }
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border cursor-pointer focus:outline-none ${
+                  PRIORITY_COLORS[req.priority_key] ?? PRIORITY_COLORS.normal
+                } disabled:opacity-60`}
+              >
+                {priorities.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-[var(--bg-surface)] text-[var(--text-primary)] font-normal uppercase">
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Closed Banner Notice */}
+      {isClosed && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2 flex items-center gap-2 text-xs text-amber-500 font-medium">
+          <Lock className="h-3.5 w-3.5" />
+          Requerimiento en estado cerrado. Cambia su estado en el menú superior para modificar título, descripción o detalles.
+        </div>
+      )}
 
       {/* Content Area (Left: Tabs/Body, Right: Metadata Sidebar) */}
       <div className="flex-1 overflow-y-auto flex">
         {/* Main Panel */}
         <div className="flex-1 p-8 space-y-6 max-w-4xl">
+          {/* Title Section (Editable) */}
           <div>
-            <h1 className="text-2xl font-bold text-[var(--text-primary)] leading-snug">{req.title}</h1>
+            {!isEditingTitle ? (
+              <div className="flex items-center gap-2 group">
+                <h1 className="text-2xl font-bold text-[var(--text-primary)] leading-snug">{req.title}</h1>
+                {!isClosed && (
+                  <button
+                    onClick={() => setIsEditingTitle(true)}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all"
+                    title="Editar título"
+                  >
+                    <Edit2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={titleValue}
+                  onChange={(e) => setTitleValue(e.target.value)}
+                  autoFocus
+                  className="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 text-xl font-bold text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
+                />
+                <button
+                  onClick={handleSaveTitle}
+                  disabled={updateReq.isPending}
+                  className="p-2 rounded-lg bg-[var(--accent-color)] text-white hover:bg-[var(--accent-color-hover)] transition-colors"
+                >
+                  <Save className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    setTitleValue(req.title);
+                    setIsEditingTitle(false);
+                  }}
+                  className="p-2 rounded-lg bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             <p className="text-xs text-[var(--text-muted)] mt-1 font-mono">
               Creado el {new Date(req.created_at).toLocaleDateString('es')} · Última actualización el {new Date(req.updated_at).toLocaleDateString('es')}
             </p>
@@ -171,8 +305,57 @@ export default function RequirementDetail() {
           {/* Tab Content */}
           <div className="py-2">
             {activeTab === 'description' && (
-              <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
-                <MarkdownPreview content={req.body_md} />
+              <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Detalle del requerimiento</span>
+                  {!isClosed && !isEditingBody && (
+                    <button
+                      onClick={() => setIsEditingBody(true)}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--bg-surface-hover)] hover:bg-[var(--border-color)] text-xs text-[var(--text-secondary)] font-semibold transition-colors"
+                    >
+                      <Edit2 className="h-3.5 w-3.5" /> Editar Descripción
+                    </button>
+                  )}
+                </div>
+
+                {!isEditingBody ? (
+                  <MarkdownPreview content={req.body_md} />
+                ) : (
+                  <div className="space-y-3">
+                    <div className="border border-[var(--border-color)] rounded-lg overflow-hidden bg-[var(--bg-surface-hover)]">
+                      <MarkdownToolbar
+                        textareaRef={textareaRef}
+                        onValueChange={(val) => setBodyValue(val)}
+                      />
+                      <textarea
+                        ref={textareaRef}
+                        value={bodyValue}
+                        onChange={(e) => setBodyValue(e.target.value)}
+                        rows={12}
+                        className="w-full bg-[var(--bg-input)] border-t border-[var(--border-color)] p-3 text-sm text-[var(--text-primary)] focus:outline-none font-mono resize-y"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        onClick={() => {
+                          setBodyValue(req.body_md);
+                          setIsEditingBody(false);
+                        }}
+                        className="px-3 py-1.5 rounded-lg bg-[var(--bg-surface-hover)] text-xs font-semibold text-[var(--text-secondary)]"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={handleSaveBody}
+                        disabled={updateReq.isPending}
+                        className="px-4 py-1.5 rounded-lg bg-[var(--accent-color)] text-white text-xs font-semibold hover:bg-[var(--accent-color-hover)] disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        {updateReq.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                        Guardar Descripción
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -222,7 +405,7 @@ export default function RequirementDetail() {
             </p>
           </div>
 
-          {/* Members / Lead Management (#8) */}
+          {/* Members / Lead Management */}
           <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
             <MemberManager
               spaceId={spaceId}

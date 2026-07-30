@@ -105,17 +105,17 @@ export function useMoveRequirement() {
   return useMutation({
     mutationFn: ({
       id,
-      new_status_id,
+      to_status_id,
       before_id,
       after_id,
     }: {
       id: string;
-      new_status_id: string;
+      to_status_id?: string;
       before_id?: string;
       after_id?: string;
     }) =>
       api.patch<void>(`/requirements/${id}/move`, {
-        new_status_id,
+        to_status_id,
         before_id,
         after_id,
       }),

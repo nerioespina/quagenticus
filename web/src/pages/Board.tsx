@@ -20,6 +20,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { useBoards, useBoard } from '../hooks/useBoard';
 import { useMoveRequirement } from '../hooks/useRequirements';
 import type { BoardCard, BoardColumn } from '../lib/api';
+import CreateRequirementModal from '../components/CreateRequirementModal';
 
 interface Context {
   spaceId: string;
@@ -72,7 +73,7 @@ function SortableCard({
           <div
             {...attributes}
             {...listeners}
-            onClick={e => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
             className="cursor-grab active:cursor-grabbing p-0.5 -ml-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             title="Arrastrar tarjeta"
           >
@@ -105,10 +106,12 @@ function DroppableColumn({
   column,
   cards,
   spaceId,
+  onAddCard,
 }: {
   column: BoardColumn;
   cards: BoardCard[];
   spaceId: string;
+  onAddCard: (statusId: string | null) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -137,17 +140,21 @@ function DroppableColumn({
         </div>
       </div>
 
-      <SortableContext items={cards.map(c => c.id)} strategy={verticalListSortingStrategy}>
+      <SortableContext items={cards.map((c) => c.id)} strategy={verticalListSortingStrategy}>
         <div className="space-y-2.5 min-h-[160px] flex-1">
-          {cards.map(card => (
+          {cards.map((card) => (
             <SortableCard key={card.id} card={card} spaceId={spaceId} />
           ))}
         </div>
       </SortableContext>
 
-      <button className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-surface-hover)] text-xs transition-all w-full">
+      {/* Connection for Punto 5: Click to open Create Requirement Modal */}
+      <button
+        onClick={() => onAddCard(column.status_id)}
+        className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-surface-hover)] text-xs font-medium transition-all w-full border border-dashed border-transparent hover:border-[var(--border-color)]"
+      >
         <Plus className="h-3.5 w-3.5" />
-        Agregar
+        Agregar requerimiento
       </button>
     </div>
   );
@@ -159,6 +166,10 @@ export default function Board() {
   const [boardId, setBoardId] = useState<string>('');
   const [activeDragCard, setActiveDragCard] = useState<BoardCard | null>(null);
 
+  // Modal creation state (Punto 5)
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createStatusId, setCreateStatusId] = useState<string | null>(null);
+
   const activeBoardId = boardId || boards[0]?.id || '';
   const { data: board, isLoading, refetch, isFetching } = useBoard(spaceId, activeBoardId);
   const moveReq = useMoveRequirement();
@@ -166,7 +177,7 @@ export default function Board() {
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: {
-        distance: 5, // Evita disparar drag con simple clic
+        distance: 5,
       },
     })
   );
@@ -186,12 +197,11 @@ export default function Board() {
     const activeCardId = active.id as string;
     const overId = over.id as string;
 
-    // Encontrar en qué columna estaba la tarjeta
     let sourceCol: BoardColumn | undefined;
     let draggedCard: BoardCard | undefined;
 
     for (const col of board.columns) {
-      const c = col.cards.find(item => item.id === activeCardId);
+      const c = col.cards.find((item) => item.id === activeCardId);
       if (c) {
         sourceCol = col;
         draggedCard = c;
@@ -201,7 +211,6 @@ export default function Board() {
 
     if (!draggedCard || !sourceCol) return;
 
-    // Encontrar la columna destino
     let targetCol: BoardColumn | undefined;
     let targetCard: BoardCard | undefined;
 
@@ -209,7 +218,7 @@ export default function Board() {
       targetCol = over.data.current.column as BoardColumn;
     } else {
       for (const col of board.columns) {
-        const c = col.cards.find(item => item.id === overId);
+        const c = col.cards.find((item) => item.id === overId);
         if (c) {
           targetCol = col;
           targetCard = c;
@@ -222,13 +231,13 @@ export default function Board() {
 
     const newStatusId = targetCol.status_id || sourceCol.status_id || '';
 
-    // Calcular before_id o after_id
     let beforeId: string | undefined;
     let afterId: string | undefined;
 
     if (targetCard && targetCard.id !== activeCardId) {
-      const idx = targetCol.cards.findIndex(c => c.id === targetCard?.id);
+      const idx = targetCol.cards.findIndex((c) => c.id === targetCard?.id);
       if (idx >= 0) {
+        beforeId = idx > 0 ? targetCol.cards[idx - 1].id : undefined;
         afterId = targetCard.id;
       }
     } else if (targetCol.cards.length > 0) {
@@ -238,12 +247,18 @@ export default function Board() {
       }
     }
 
+    // Punto 4 fix: pass to_status_id (matching backend MoveRequest)
     await moveReq.mutateAsync({
       id: draggedCard.id,
-      new_status_id: newStatusId,
+      to_status_id: newStatusId,
       before_id: beforeId,
       after_id: afterId,
     });
+  };
+
+  const handleOpenAddModal = (statusId: string | null) => {
+    setCreateStatusId(statusId);
+    setIsCreateOpen(true);
   };
 
   if (loadingBoards) {
@@ -268,7 +283,7 @@ export default function Board() {
         <div>
           <h2 className="text-xl font-bold text-[var(--text-primary)]">Tablero Kanban</h2>
           <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Arrastra tarjetas para priorizar en columna o cambiar de estado (#3)
+            Arrastra tarjetas para priorizar en columna o cambiar de estado
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -281,10 +296,10 @@ export default function Board() {
           {boards.length > 1 && (
             <select
               value={activeBoardId}
-              onChange={e => setBoardId(e.target.value)}
+              onChange={(e) => setBoardId(e.target.value)}
               className="bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-secondary)] focus:outline-none"
             >
-              {boards.map(b => (
+              {boards.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
                 </option>
@@ -312,9 +327,9 @@ export default function Board() {
           onDragEnd={handleDragEnd}
         >
           <div className="flex gap-4 overflow-x-auto pb-4">
-            {board.columns.map(col => {
+            {board.columns.map((col) => {
               const filteredCards = col.cards.filter(
-                c =>
+                (c) =>
                   !search ||
                   c.title.toLowerCase().includes(search.toLowerCase()) ||
                   (c.ref_key ?? '').toLowerCase().includes(search.toLowerCase())
@@ -326,6 +341,7 @@ export default function Board() {
                   column={col}
                   cards={filteredCards}
                   spaceId={spaceId}
+                  onAddCard={handleOpenAddModal}
                 />
               );
             })}
@@ -355,6 +371,17 @@ export default function Board() {
         </DndContext>
       ) : (
         <div className="text-[var(--text-muted)] text-sm">Selecciona un tablero.</div>
+      )}
+
+      {/* Creation Modal for Punto 5 */}
+      {isCreateOpen && (
+        <CreateRequirementModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          spaceId={spaceId}
+          defaultStatusId={createStatusId}
+          onSuccess={() => refetch()}
+        />
       )}
     </div>
   );

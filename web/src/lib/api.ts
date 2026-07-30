@@ -259,4 +259,24 @@ export interface CreateDocumentLinkRequest {
   note?: string;
 }
 
+export interface SystemUser {
+  id: string;
+  account_id: string;
+  email: string;
+  display_name: string;
+  avatar_url: string | null;
+  is_account_admin: boolean;
+  locale: string;
+  status: string;
+  created_at: string;
+}
+
+export interface SpaceMember {
+  id: string;
+  display_name: string;
+  email: string;
+  role: 'admin' | 'maintainer' | 'contributor' | 'viewer';
+}
+
+
 

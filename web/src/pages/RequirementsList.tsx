@@ -1,22 +1,11 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import { useOutletContext, useNavigate } from 'react-router-dom';
 import { Plus, Loader2 } from 'lucide-react';
-import { useRequirements, useCreateRequirement } from '../hooks/useRequirements';
-import { useCategories, useMilestones } from '../hooks/useCatalogs';
-import { api } from '../lib/api';
-import type { Tracker, Priority } from '../lib/api';
-import { useQuery } from '@tanstack/react-query';
-import Modal from '../components/Modal';
-import MarkdownToolbar from '../components/MarkdownToolbar';
+import { useRequirements } from '../hooks/useRequirements';
+import { useTrackers, usePriorities } from '../hooks/useCatalogs';
+import CreateRequirementModal from '../components/CreateRequirementModal';
 
 interface Context { spaceId: string; search: string }
-
-function useTrackers() {
-  return useQuery({ queryKey: ['trackers'], queryFn: () => api.get<Tracker[]>('/catalogs/trackers') });
-}
-function usePriorities() {
-  return useQuery({ queryKey: ['priorities'], queryFn: () => api.get<Priority[]>('/catalogs/priorities') });
-}
 
 const STATUS_COLORS: Record<string, string> = {
   new:          'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)]',
@@ -32,43 +21,17 @@ const STATUS_COLORS: Record<string, string> = {
 export default function RequirementsList() {
   const { spaceId, search } = useOutletContext<Context>();
   const navigate = useNavigate();
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { data: reqs = [], isLoading } = useRequirements(spaceId);
   const { data: trackers = [] } = useTrackers();
   const { data: priorities = [] } = usePriorities();
-  const { data: categories = [] } = useCategories(spaceId);
-  const { data: milestones = [] } = useMilestones(spaceId);
-  const createReq = useCreateRequirement(spaceId);
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    title: '',
-    body_md: '',
-    tracker_id: '',
-    priority_id: '',
-    category_id: '',
-    milestone_id: '',
-  });
 
   const filtered = reqs.filter(r =>
     !search ||
     r.title.toLowerCase().includes(search.toLowerCase()) ||
     (r.ref_key ?? '').toLowerCase().includes(search.toLowerCase())
   );
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!form.tracker_id) return;
-    const priorityId = form.priority_id || priorities.find(p => p.is_default)?.id || priorities[0]?.id;
-    await createReq.mutateAsync({
-      ...form,
-      priority_id: priorityId!,
-      category_id: form.category_id || undefined,
-      milestone_id: form.milestone_id || undefined,
-    });
-    setShowForm(false);
-    setForm({ title: '', body_md: '', tracker_id: '', priority_id: '', category_id: '', milestone_id: '' });
-  };
 
   const trackerMap = Object.fromEntries(trackers.map(t => [t.id, t]));
   const priorityMap = Object.fromEntries(priorities.map(p => [p.id, p]));
@@ -89,116 +52,11 @@ export default function RequirementsList() {
         </button>
       </div>
 
-      <Modal
+      <CreateRequirementModal
         isOpen={showForm}
         onClose={() => setShowForm(false)}
-        title="Nuevo requerimiento"
-      >
-        <form onSubmit={handleCreate} className="space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-              Título
-            </label>
-            <input
-              placeholder="Título del requerimiento"
-              value={form.title}
-              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-              required
-              className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-[var(--accent-color)]/60"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                Tracker
-              </label>
-              <select
-                value={form.tracker_id}
-                onChange={e => setForm(f => ({ ...f, tracker_id: e.target.value }))}
-                required
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-secondary)] focus:outline-none"
-              >
-                <option value="">Seleccionar Tracker…</option>
-                {trackers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                Prioridad
-              </label>
-              <select
-                value={form.priority_id}
-                onChange={e => setForm(f => ({ ...f, priority_id: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-secondary)] focus:outline-none"
-              >
-                <option value="">Seleccionar Prioridad…</option>
-                {priorities.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                Categoría
-              </label>
-              <select
-                value={form.category_id}
-                onChange={e => setForm(f => ({ ...f, category_id: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-secondary)] focus:outline-none"
-              >
-                <option value="">(Sin categoría)</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-                Hito
-              </label>
-              <select
-                value={form.milestone_id}
-                onChange={e => setForm(f => ({ ...f, milestone_id: e.target.value }))}
-                className="w-full bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-2 text-sm text-[var(--text-secondary)] focus:outline-none"
-              >
-                <option value="">(Sin hito)</option>
-                {milestones.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">
-              Descripción (Markdown)
-            </label>
-            <div className="border border-[var(--border-color)] rounded-lg overflow-hidden bg-[var(--bg-surface-hover)]">
-              <MarkdownToolbar
-                textareaRef={textareaRef}
-                onValueChange={(val) => setForm(f => ({ ...f, body_md: val }))}
-              />
-              <textarea
-                ref={textareaRef}
-                placeholder="Escribe la descripción en formato Markdown..."
-                value={form.body_md}
-                onChange={e => setForm(f => ({ ...f, body_md: e.target.value }))}
-                rows={10}
-                className="w-full bg-[var(--bg-input)] border-t border-[var(--border-color)] p-3 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none font-mono resize-y min-h-[200px]"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowForm(false)}
-              className="px-4 py-2 rounded-lg bg-[var(--bg-surface-hover)] hover:bg-[var(--border-color)] text-[var(--text-secondary)] text-sm font-semibold transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={createReq.isPending}
-              className="px-5 py-2 rounded-lg bg-[var(--accent-color)] hover:bg-[var(--accent-color-hover)] disabled:opacity-60 text-[var(--text-inverted)] text-sm font-semibold transition-colors"
-            >
-              {createReq.isPending ? 'Creando…' : 'Crear requerimiento'}
-            </button>
-          </div>
-        </form>
-      </Modal>
+        spaceId={spaceId}
+      />
 
       <div className="bg-[var(--bg-surface)] border border-[var(--border-color)] rounded-xl overflow-hidden">
         {isLoading ? (
