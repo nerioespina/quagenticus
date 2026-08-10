@@ -1,4 +1,4 @@
--- Seed data for a fresh installation
+e-- Seed data for a fresh installation
 -- Run this after all DDL is applied
 
 DO $$
@@ -65,31 +65,13 @@ BEGIN
     INSERT INTO tracker (account_id, key, name, icon, default_status_id, ord) VALUES
         (v_account_id, 'task',    'Task',         '✅', v_status_new, 2) RETURNING id INTO v_tracker_task;
 
-    -- Workflow transitions (for all trackers, allow any → new states)
-    INSERT INTO workflow_transition (tracker_id, from_status_id, to_status_id) VALUES
-        (v_tracker_bug,  v_status_new,  v_status_tri),
-        (v_tracker_bug,  v_status_tri,  v_status_rdy),
-        (v_tracker_bug,  v_status_rdy,  v_status_prog),
-        (v_tracker_bug,  v_status_prog, v_status_rev),
-        (v_tracker_bug,  v_status_rev,  v_status_res),
-        (v_tracker_bug,  v_status_res,  v_status_clo),
-        (v_tracker_bug,  NULL,           v_status_new);  -- reopen from anywhere
+    -- Workflow transitions (allow flexible transitions between all statuses for all trackers)
+    INSERT INTO workflow_transition (tracker_id, from_status_id, to_status_id)
+    SELECT t.id, NULL, s.id
+    FROM tracker t
+    CROSS JOIN workflow_status s
+    WHERE t.account_id = v_account_id AND s.account_id = v_account_id;
 
-    INSERT INTO workflow_transition (tracker_id, from_status_id, to_status_id) VALUES
-        (v_tracker_feat, v_status_new,  v_status_tri),
-        (v_tracker_feat, v_status_tri,  v_status_rdy),
-        (v_tracker_feat, v_status_rdy,  v_status_prog),
-        (v_tracker_feat, v_status_prog, v_status_rev),
-        (v_tracker_feat, v_status_rev,  v_status_res),
-        (v_tracker_feat, v_status_res,  v_status_clo),
-        (v_tracker_feat, NULL,           v_status_new);
-
-    INSERT INTO workflow_transition (tracker_id, from_status_id, to_status_id) VALUES
-        (v_tracker_task, v_status_new,  v_status_rdy),
-        (v_tracker_task, v_status_rdy,  v_status_prog),
-        (v_tracker_task, v_status_prog, v_status_res),
-        (v_tracker_task, v_status_res,  v_status_clo),
-        (v_tracker_task, NULL,           v_status_new);
 
     -- Priorities
     INSERT INTO priority (account_id, key, name, weight, color) VALUES

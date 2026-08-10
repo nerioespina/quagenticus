@@ -116,7 +116,7 @@ BEGIN
         RETURN; -- idempotent
     END IF;
 
-    -- Check transition is defined (from current or wildcard)
+    -- Check transition is defined (from current or wildcard), OR allow flexible transition if target status belongs to the same account
     SELECT EXISTS (
         SELECT 1 FROM workflow_transition
         WHERE tracker_id = v_req.tracker_id
@@ -126,7 +126,13 @@ BEGIN
     ) INTO v_allowed;
 
     IF NOT v_allowed THEN
-        RAISE EXCEPTION 'Transición no permitida desde el estado actual' USING ERRCODE = 'QG422';
+        SELECT EXISTS (
+            SELECT 1 FROM workflow_status
+            WHERE id = p_to_status_id AND account_id = v_account_id
+        ) INTO v_allowed;
+        IF NOT v_allowed THEN
+            RAISE EXCEPTION 'Transición no permitida desde el estado actual' USING ERRCODE = 'QG422';
+        END IF;
     END IF;
 
     UPDATE requirement SET
@@ -204,4 +210,17 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql;
+
+-- Ensure all existing trackers allow flexible wildcard transitions to any workflow status
+INSERT INTO workflow_transition (tracker_id, from_status_id, to_status_id)
+SELECT t.id, NULL, s.id
+FROM tracker t
+JOIN workflow_status s ON s.account_id = t.account_id
+WHERE NOT EXISTS (
+    SELECT 1 FROM workflow_transition wt
+    WHERE wt.tracker_id = t.id
+      AND wt.from_status_id IS NULL
+      AND wt.to_status_id = s.id
+);
+
 
