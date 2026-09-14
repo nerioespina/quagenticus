@@ -1,415 +1,293 @@
 package handlers
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-playground/validator/v10"
 	"github.com/jackc/pgx/v5"
-	"github.com/nespina/quagenticus/internal/auth"
-	"github.com/nespina/quagenticus/internal/db"
+	"github.com/nespina/quagenticus/internal/authz"
 	"github.com/nespina/quagenticus/internal/httpx"
-	"github.com/nespina/quagenticus/internal/models"
 )
 
-var validate = validator.New()
+const documentColumns = `d.id, d.space_id, d.parent_id, d.doc_type, d.ref_key, d.slug, d.title,
+       d.version, d.is_archived, d.archived_at, d.position, d.depth, d.word_count, d.created_at, d.updated_at,
+       d.creator_id, cu.display_name AS creator_name, d.updater_id, uu.display_name AS updater_name`
 
-type Documents struct {
-	db *db.DB
-}
-
-func NewDocuments(db *db.DB) *Documents {
-	return &Documents{db: db}
-}
-
-func (h *Documents) List(w http.ResponseWriter, r *http.Request) {
-	spaceID := chi.URLParam(r, "spaceId")
-	docType := r.URL.Query().Get("type")
-
-	query := `
-		SELECT id, space_id, parent_id, doc_type, ref_key, slug, title,
-		       body_md, version, is_archived, created_at, updated_at
-		FROM document
-		WHERE space_id = $1 AND is_archived = false
-	`
-	args := []any{spaceID}
-	if docType != "" {
-		query += ` AND doc_type = $2`
-		args = append(args, docType)
+// ListDocuments filters by ?type (comma list; default: everything but requirements),
+// ?parent_id (uuid|root), ?archived=true, ?favorites=true, ?q. Bodies are
+// replaced by a 200-char excerpt.
+func (a *API) ListDocuments(w http.ResponseWriter, r *http.Request) {
+	acc := authz.From(r.Context())
+	act := actor(r)
+	q := r.URL.Query()
+	types := httpx.QueryList(r, "type")
+	if len(types) == 0 && q.Get("all") != "true" {
+		types = []string{"folder", "note", "wiki", "template"}
 	}
-	query += ` ORDER BY updated_at DESC`
+	parent := q.Get("parent_id")
+	a.array(w, r, `
+		SELECT `+documentColumns+`, left(regexp_replace(d.body_md, '\s+', ' ', 'g'), 200) AS excerpt,
+		       EXISTS (SELECT 1 FROM document_favorite f WHERE f.document_id = d.id AND f.user_id = $6::uuid) AS is_favorite,
+		       (SELECT count(*) FROM document c WHERE c.parent_id = d.id AND NOT c.is_archived) AS children_count,
+		       coalesce((SELECT jsonb_agg(jsonb_build_object('id', l.id, 'name', l.name, 'color', l.color) ORDER BY l.name)
+		                   FROM document_label dl JOIN label l ON l.id = dl.label_id WHERE dl.document_id = d.id), '[]') AS labels
+		  FROM document d
+		  LEFT JOIN app_user cu ON cu.id = d.creator_id
+		  LEFT JOIN app_user uu ON uu.id = d.updater_id
+		 WHERE d.space_id = $1
+		   AND d.is_archived = $2
+		   AND ($3::text[] IS NULL OR d.doc_type::text = ANY ($3))
+		   AND ($4 = '' OR ($4 = 'root' AND d.parent_id IS NULL) OR d.parent_id::text = $4)
+		   AND ($5 = '' OR qg_unaccent(d.title) ILIKE '%' || qg_unaccent($5) || '%' OR d.search_tsv @@ websearch_to_tsquery('spanish', $5))
+		   AND (NOT $7 OR EXISTS (SELECT 1 FROM document_favorite f WHERE f.document_id = d.id AND f.user_id = $6::uuid))
+		 ORDER BY d.doc_type <> 'folder', d.position, d.title`,
+		acc.SpaceID, q.Get("archived") == "true", types, parent, q.Get("q"), uuidOrNil(act.ID), q.Get("favorites") == "true")
+}
 
-	rows, err := h.db.Pool.Query(r.Context(), query, args...)
-	if err != nil {
+type documentCreateRequest struct {
+	ParentID *string `json:"parent_id" validate:"omitempty,uuid"`
+	DocType  string  `json:"doc_type"  validate:"required,oneof=folder note wiki template"`
+	Title    string  `json:"title"     validate:"required"`
+	BodyMD   string  `json:"body_md"`
+}
+
+func (a *API) CreateDocument(w http.ResponseWriter, r *http.Request) {
+	var in documentCreateRequest
+	if err := httpx.Decode(r, &in); err != nil {
 		httpx.RespondError(w, err)
 		return
 	}
-	defer rows.Close()
-
-	docs := make([]models.DocumentResponse, 0)
-	for rows.Next() {
-		var d models.DocumentResponse
-		if err := rows.Scan(
-			&d.ID, &d.SpaceID, &d.ParentID, &d.DocType, &d.RefKey, &d.Slug,
-			&d.Title, &d.BodyMD, &d.Version, &d.IsArchived, &d.CreatedAt, &d.UpdatedAt,
-		); err != nil {
-			httpx.RespondError(w, err)
-			return
+	acc := authz.From(r.Context())
+	var id string
+	err := a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		if in.ParentID != nil {
+			var ok bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM document WHERE id = $1 AND space_id = $2 AND doc_type = 'folder' AND NOT is_archived)`,
+				*in.ParentID, acc.SpaceID).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				return httpx.NewError(http.StatusUnprocessableEntity, "unprocessable", "la carpeta destino no existe")
+			}
 		}
-		docs = append(docs, d)
-	}
-
-	httpx.RespondJSON(w, http.StatusOK, docs)
-}
-
-func (h *Documents) Create(w http.ResponseWriter, r *http.Request) {
-	spaceID := chi.URLParam(r, "spaceId")
-	actor := auth.ActorFrom(r.Context())
-
-	var in models.DocumentCreate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
-		return
-	}
-	in.SpaceID = spaceID
-	if err := validate.Struct(in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: err.Error()})
-		return
-	}
-
-	var out models.DocumentResponse
-	err := h.db.WithActor(r.Context(), actor, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `
-			SELECT id, space_id, parent_id, doc_type, ref_key, slug, title,
-			       body_md, version, is_archived, created_at, updated_at
-			FROM document_create($1, $2, $3, $4, $5, $6)
-		`, in.SpaceID, in.ParentID, in.DocType, in.Title, in.BodyMD, in.FrontMatter,
-		).Scan(
-			&out.ID, &out.SpaceID, &out.ParentID, &out.DocType, &out.RefKey, &out.Slug,
-			&out.Title, &out.BodyMD, &out.Version, &out.IsArchived, &out.CreatedAt, &out.UpdatedAt,
-		)
-	})
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
-	httpx.RespondJSON(w, http.StatusCreated, out)
-}
-
-func (h *Documents) Get(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-
-	var out models.DocumentResponse
-	err := h.db.Pool.QueryRow(r.Context(), `
-		SELECT id, space_id, parent_id, doc_type, ref_key, slug, title,
-		       body_md, version, is_archived, created_at, updated_at
-		FROM document WHERE id = $1 AND is_archived = false
-	`, id).Scan(
-		&out.ID, &out.SpaceID, &out.ParentID, &out.DocType, &out.RefKey, &out.Slug,
-		&out.Title, &out.BodyMD, &out.Version, &out.IsArchived, &out.CreatedAt, &out.UpdatedAt,
-	)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
-	httpx.RespondJSON(w, http.StatusOK, out)
-}
-
-func (h *Documents) Update(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	actor := auth.ActorFrom(r.Context())
-
-	var in models.DocumentUpdate
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
-		return
-	}
-
-	var out models.DocumentResponse
-	err := h.db.WithActor(r.Context(), actor, func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `
-			SELECT id, space_id, parent_id, doc_type, ref_key, slug, title,
-			       body_md, version, is_archived, created_at, updated_at
-			FROM document_update($1, $2, $3, $4)
-		`, id, in.Title, in.BodyMD, in.Version).Scan(
-			&out.ID, &out.SpaceID, &out.ParentID, &out.DocType, &out.RefKey, &out.Slug,
-			&out.Title, &out.BodyMD, &out.Version, &out.IsArchived, &out.CreatedAt, &out.UpdatedAt,
-		)
-	})
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
-	httpx.RespondJSON(w, http.StatusOK, out)
-}
-
-func (h *Documents) Delete(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	actor := auth.ActorFrom(r.Context())
-
-	err := h.db.WithActor(r.Context(), actor, func(tx pgx.Tx) error {
-		_, err := tx.Exec(r.Context(),
-			`UPDATE document SET is_archived = true, archived_at = now() WHERE id = $1`, id)
+		if err := tx.QueryRow(ctx, `SELECT id FROM document_create($1, $2, $3::document_type, $4, $5)`,
+			acc.SpaceID, in.ParentID, in.DocType, in.Title, in.BodyMD).Scan(&id); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT document_set_parent($1, $2)`, id, in.ParentID)
 		return err
 	})
 	if err != nil {
 		httpx.RespondError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusNoContent)
+	a.writeDocument(w, r, http.StatusCreated, id)
 }
 
-func (h *Documents) History(w http.ResponseWriter, r *http.Request) {
+func (a *API) GetDocument(w http.ResponseWriter, r *http.Request) {
+	a.writeDocument(w, r, http.StatusOK, chi.URLParam(r, "id"))
+}
+
+func (a *API) writeDocument(w http.ResponseWriter, r *http.Request, status int, id string) {
+	act := actor(r)
+	acc := authz.From(r.Context())
+	a.rawJSON(w, r, status, `
+		SELECT to_jsonb(x) FROM (
+		    SELECT `+documentColumns+`, d.body_md, d.front_matter,
+		           EXISTS (SELECT 1 FROM document_favorite f WHERE f.document_id = d.id AND f.user_id = $2::uuid) AS is_favorite,
+		           EXISTS (SELECT 1 FROM watcher WHERE document_id = d.id AND subject_type = $3::actor_type AND subject_id = $4::uuid) AS is_watching,
+		           $5::text AS my_role,
+		           coalesce((SELECT jsonb_agg(jsonb_build_object('id', l.id, 'name', l.name, 'color', l.color) ORDER BY l.name)
+		                       FROM document_label dl JOIN label l ON l.id = dl.label_id WHERE dl.document_id = d.id), '[]') AS labels,
+		           coalesce((SELECT jsonb_agg(jsonb_build_object('ord', s.ord, 'level', s.level, 'heading', s.heading, 'slug', s.slug) ORDER BY s.ord)
+		                       FROM document_section s WHERE s.document_id = d.id), '[]') AS sections,
+		           coalesce((WITH RECURSIVE anc AS (
+		                        SELECT p.id, p.parent_id, p.title, 1 AS lvl FROM document p WHERE p.id = d.parent_id
+		                        UNION ALL
+		                        SELECT p.id, p.parent_id, p.title, anc.lvl + 1 FROM document p JOIN anc ON p.id = anc.parent_id WHERE anc.lvl < 20
+		                     ) SELECT jsonb_agg(jsonb_build_object('id', id, 'title', title) ORDER BY lvl DESC) FROM anc), '[]') AS breadcrumbs
+		      FROM document d
+		      LEFT JOIN app_user cu ON cu.id = d.creator_id
+		      LEFT JOIN app_user uu ON uu.id = d.updater_id
+		     WHERE d.id = $1
+		) x`, uuidOrNil(id), uuidOrNil(act.ID), act.Type, act.ID, acc.Role.String())
+}
+
+func (a *API) UpdateDocument(w http.ResponseWriter, r *http.Request) {
+	in, err := httpx.DecodeObject(r, "title", "body_md", "version", "doc_type")
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
 	id := chi.URLParam(r, "id")
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, document_id, version, title, body_md,
-		       change_summary, actor_type, actor_id, created_at
-		FROM document_version
-		WHERE document_id = $1
-		ORDER BY version DESC
-	`, id)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	type versionRow struct {
-		ID           string  `json:"id"`
-		DocumentID   string  `json:"document_id"`
-		Version      int     `json:"version"`
-		Title        string  `json:"title"`
-		BodyMD       string  `json:"body_md"`
-		ChangeSummary *string `json:"change_summary"`
-		ActorType    string  `json:"actor_type"`
-		ActorID      *string `json:"actor_id"`
-		CreatedAt    string  `json:"created_at"`
-	}
-
-	versions := make([]versionRow, 0)
-	for rows.Next() {
-		var v versionRow
-		if err := rows.Scan(
-			&v.ID, &v.DocumentID, &v.Version, &v.Title, &v.BodyMD,
-			&v.ChangeSummary, &v.ActorType, &v.ActorID, &v.CreatedAt,
-		); err != nil {
-			httpx.RespondError(w, err)
-			return
+	err = a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		var docType string
+		if err := tx.QueryRow(ctx, `SELECT doc_type FROM document WHERE id = $1`, id).Scan(&docType); err != nil {
+			return err
 		}
-		versions = append(versions, v)
-	}
-
-	httpx.RespondJSON(w, http.StatusOK, versions)
-}
-
-func (h *Documents) Trackers(w http.ResponseWriter, r *http.Request) {
-	actor := auth.ActorFrom(r.Context())
-
-	type trackerRow struct {
-		ID   string `json:"id"`
-		Key  string `json:"key"`
-		Name string `json:"name"`
-		Icon *string `json:"icon"`
-		Color *string `json:"color"`
-	}
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, key, name, icon, color FROM tracker
-		WHERE account_id = $1 AND is_active = true ORDER BY ord
-	`, actor.AccountID)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	list := make([]trackerRow, 0)
-	for rows.Next() {
-		var t trackerRow
-		if err := rows.Scan(&t.ID, &t.Key, &t.Name, &t.Icon, &t.Color); err != nil {
-			httpx.RespondError(w, err)
-			return
+		if docType == "requirement" {
+			var version any
+			if v, ok := in["version"]; ok {
+				version = string(v)
+			}
+			patch := map[string]any{}
+			if v, ok := in["title"]; ok {
+				patch["title"] = v
+			}
+			if v, ok := in["body_md"]; ok {
+				patch["body_md"] = v
+			}
+			_, err := tx.Exec(ctx, `SELECT requirement_patch($1, $2::jsonb, $3::int)`, id, jsonParam(patch), version)
+			return err
 		}
-		list = append(list, t)
-	}
-	httpx.RespondJSON(w, http.StatusOK, list)
-}
-
-func (h *Documents) Priorities(w http.ResponseWriter, r *http.Request) {
-	actor := auth.ActorFrom(r.Context())
-
-	type priorityRow struct {
-		ID        string `json:"id"`
-		Key       string `json:"key"`
-		Name      string `json:"name"`
-		Weight    int    `json:"weight"`
-		Color     *string `json:"color"`
-		IsDefault bool   `json:"is_default"`
-	}
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, key, name, weight, color, is_default FROM priority
-		WHERE account_id = $1 ORDER BY weight DESC
-	`, actor.AccountID)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	list := make([]priorityRow, 0)
-	for rows.Next() {
-		var p priorityRow
-		if err := rows.Scan(&p.ID, &p.Key, &p.Name, &p.Weight, &p.Color, &p.IsDefault); err != nil {
-			httpx.RespondError(w, err)
-			return
+		_, err := tx.Exec(ctx, `
+			SELECT document_update($1, $2::jsonb->>'title', $2::jsonb->>'body_md', ($2::jsonb->>'version')::int)`,
+			id, jsonParam(in))
+		if err != nil {
+			return err
 		}
-		list = append(list, p)
-	}
-	httpx.RespondJSON(w, http.StatusOK, list)
-}
-
-func (h *Documents) Labels(w http.ResponseWriter, r *http.Request) {
-	type labelRow struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Color string `json:"color"`
-	}
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, name, color FROM label ORDER BY name
-	`)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	list := make([]labelRow, 0)
-	for rows.Next() {
-		var l labelRow
-		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
-			httpx.RespondError(w, err)
-			return
+		if t, ok := in["doc_type"]; ok {
+			_, err = tx.Exec(ctx, `
+				UPDATE document SET doc_type = ($2::jsonb #>> '{}')::document_type
+				 WHERE id = $1 AND doc_type IN ('note', 'wiki', 'template') AND ($2::jsonb #>> '{}') IN ('note', 'wiki', 'template')`,
+				id, string(t))
 		}
-		list = append(list, l)
-	}
-	httpx.RespondJSON(w, http.StatusOK, list)
-}
-
-func (h *Documents) SpaceLabels(w http.ResponseWriter, r *http.Request) {
-	spaceID := chi.URLParam(r, "spaceId")
-	actor := auth.ActorFrom(r.Context())
-
-	type labelRow struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Color string `json:"color"`
-	}
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, name, color FROM label
-		WHERE space_id = $1 OR (space_id IS NULL AND account_id = $2)
-		ORDER BY name
-	`, spaceID, actor.AccountID)
+		return err
+	})
 	if err != nil {
 		httpx.RespondError(w, err)
 		return
 	}
-	defer rows.Close()
+	a.writeDocument(w, r, http.StatusOK, id)
+}
 
-	list := make([]labelRow, 0)
-	for rows.Next() {
-		var l labelRow
-		if err := rows.Scan(&l.ID, &l.Name, &l.Color); err != nil {
-			httpx.RespondError(w, err)
-			return
+type documentMoveRequest struct {
+	ParentID *string `json:"parent_id" validate:"omitempty,uuid"`
+	BeforeID *string `json:"before_id" validate:"omitempty,uuid"`
+	AfterID  *string `json:"after_id"  validate:"omitempty,uuid"`
+}
+
+func (a *API) MoveDocument(w http.ResponseWriter, r *http.Request) {
+	var in documentMoveRequest
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	err := a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `SELECT document_move($1, $2, $3, $4)`, id, in.ParentID, in.BeforeID, in.AfterID)
+		return err
+	})
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	a.writeDocument(w, r, http.StatusOK, id)
+}
+
+func (a *API) DocumentHistory(w http.ResponseWriter, r *http.Request) {
+	a.array(w, r, `
+		SELECT v.id, v.document_id, v.version, v.title, length(v.body_md) AS length, v.change_summary,
+		       v.actor_type, v.actor_id, coalesce(u.display_name, ag.name) AS actor_name, v.created_at
+		  FROM document_version v
+		  LEFT JOIN app_user u ON u.id = v.actor_id AND v.actor_type = 'user'
+		  LEFT JOIN agent ag ON ag.id = v.actor_id AND v.actor_type = 'agent'
+		 WHERE v.document_id = $1
+		 ORDER BY v.version DESC`, chi.URLParam(r, "id"))
+}
+
+func (a *API) DocumentVersion(w http.ResponseWriter, r *http.Request) {
+	a.object(w, r, `
+		SELECT id, document_id, version, title, body_md, change_summary, actor_type, actor_id, created_at
+		  FROM document_version WHERE document_id = $1 AND version = $2::int`,
+		chi.URLParam(r, "id"), chi.URLParam(r, "version"))
+}
+
+type restoreVersionRequest struct {
+	Version int `json:"version" validate:"required,min=1"`
+}
+
+func (a *API) RestoreDocumentVersion(w http.ResponseWriter, r *http.Request) {
+	var in restoreVersionRequest
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	err := a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		var title, body, docType string
+		if err := tx.QueryRow(ctx, `
+			SELECT v.title, v.body_md, d.doc_type FROM document_version v JOIN document d ON d.id = v.document_id
+			 WHERE v.document_id = $1 AND v.version = $2`, id, in.Version).Scan(&title, &body, &docType); err != nil {
+			return err
 		}
-		list = append(list, l)
-	}
-	httpx.RespondJSON(w, http.StatusOK, list)
-}
-
-func (h *Documents) CreateSpaceLabel(w http.ResponseWriter, r *http.Request) {
-	spaceID := chi.URLParam(r, "spaceId")
-	actor := auth.ActorFrom(r.Context())
-
-	var req struct {
-		Name  string `json:"name"`
-		Color string `json:"color"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
-		http.Error(w, "invalid json or missing name", http.StatusBadRequest)
-		return
-	}
-	if req.Color == "" {
-		req.Color = "blue"
-	}
-
-	slug := strings.ToLower(strings.ReplaceAll(req.Name, " ", "-"))
-
-	type labelRow struct {
-		ID    string `json:"id"`
-		Name  string `json:"name"`
-		Color string `json:"color"`
-	}
-
-	var l labelRow
-	err := h.db.Pool.QueryRow(r.Context(), `
-		INSERT INTO label (account_id, space_id, name, slug, color, creator_id)
-		VALUES ($1, $2, $3, $4, $5::label_color, $6)
-		RETURNING id, name, color::text
-	`, actor.AccountID, spaceID, req.Name, slug, req.Color, actor.ID).Scan(&l.ID, &l.Name, &l.Color)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
-	httpx.RespondJSON(w, http.StatusCreated, l)
-}
-
-
-func (h *Documents) Statuses(w http.ResponseWriter, r *http.Request) {
-	actor := auth.ActorFrom(r.Context())
-
-	type statusRow struct {
-		ID        string  `json:"id"`
-		Key       string  `json:"key"`
-		Name      string  `json:"name"`
-		Color     *string `json:"color"`
-		Ord       int     `json:"ord"`
-		IsDefault bool    `json:"is_default"`
-		IsClosed  bool    `json:"is_closed"`
-	}
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, key, name, color, ord, is_default, is_closed
-		FROM workflow_status
-		WHERE account_id = $1
-		ORDER BY ord
-	`, actor.AccountID)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	list := make([]statusRow, 0)
-	for rows.Next() {
-		var s statusRow
-		if err := rows.Scan(&s.ID, &s.Key, &s.Name, &s.Color, &s.Ord, &s.IsDefault, &s.IsClosed); err != nil {
-			httpx.RespondError(w, err)
-			return
+		if docType == "requirement" {
+			_, err := tx.Exec(ctx, `SELECT requirement_patch($1, jsonb_build_object('title', $2::text, 'body_md', $3::text))`, id, title, body)
+			return err
 		}
-		list = append(list, s)
+		_, err := tx.Exec(ctx, `SELECT document_update($1, $2, $3, NULL)`, id, title, body)
+		return err
+	})
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
 	}
-	httpx.RespondJSON(w, http.StatusOK, list)
+	a.writeDocument(w, r, http.StatusOK, id)
 }
 
+func (a *API) FavoriteDocument(w http.ResponseWriter, r *http.Request) {
+	a.exec(w, r, `
+		WITH f AS (INSERT INTO document_favorite (document_id, user_id) VALUES ($1, qg_responsible_user_id()) ON CONFLICT DO NOTHING RETURNING 1)
+		UPDATE document SET is_favorite_count = is_favorite_count + (SELECT count(*) FROM f) WHERE id = $1`, chi.URLParam(r, "id"))
+}
+
+func (a *API) UnfavoriteDocument(w http.ResponseWriter, r *http.Request) {
+	a.exec(w, r, `
+		WITH f AS (DELETE FROM document_favorite WHERE document_id = $1 AND user_id = qg_responsible_user_id() RETURNING 1)
+		UPDATE document SET is_favorite_count = greatest(is_favorite_count - (SELECT count(*) FROM f), 0) WHERE id = $1`, chi.URLParam(r, "id"))
+}
+
+type promoteRequest struct {
+	TrackerID  string  `json:"tracker_id"  validate:"required,uuid"`
+	PriorityID *string `json:"priority_id" validate:"omitempty,uuid"`
+}
+
+func (a *API) PromoteDocument(w http.ResponseWriter, r *http.Request) {
+	var in promoteRequest
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var ref string
+	err := a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT document_promote($1, $2, $3)`, id, in.TrackerID, in.PriorityID).Scan(&ref)
+	})
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	httpx.RespondJSON(w, http.StatusOK, map[string]string{"id": id, "ref_key": ref})
+}
+
+// ExportDocument downloads the markdown source with a small front matter.
+func (a *API) ExportDocument(w http.ResponseWriter, r *http.Request) {
+	var slug, md string
+	err := a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `
+			SELECT coalesce(ref_key, slug),
+			       E'---\n' || 'title: "' || replace(title, '"', '\"') || E'"\n' ||
+			       coalesce('ref: ' || ref_key || E'\n', '') ||
+			       'type: ' || doc_type || E'\n' || 'version: ' || version || E'\n' ||
+			       'updated_at: ' || to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSOF') || E'\n---\n\n' || body_md
+			  FROM document WHERE id = $1`, chi.URLParam(r, "id")).Scan(&slug, &md)
+	})
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", contentDisposition("attachment", slug+".md"))
+	w.Write([]byte(md)) //nolint:errcheck
+}

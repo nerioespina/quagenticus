@@ -47,6 +47,9 @@ services:
       QG_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
       QG_STORAGE_BACKEND: fs
       QG_STORAGE_PATH: /var/lib/quagenticus/attachments
+      QG_UPLOAD_MAX_MB: ${QG_UPLOAD_MAX_MB:-25}
+      QG_UPLOAD_MAX_FILES: ${QG_UPLOAD_MAX_FILES:-10}
+      QG_COOKIE_SECURE: ${QG_COOKIE_SECURE:-false}
     volumes:
       - attachments:/var/lib/quagenticus/attachments
     ports:
@@ -76,6 +79,16 @@ services:
         condition: service_completed_successfully
     environment:
       QG_DATABASE_URL: postgresql://qg:qg@db:5432/quagenticus
+      QG_DB_SCHEMA: quagenticus
+      QG_STORAGE_PATH: /var/lib/quagenticus/attachments
+      QG_PUBLIC_URL: ${QG_PUBLIC_URL:-http://localhost:3000}
+      QG_SMTP_HOST: ${QG_SMTP_HOST:-}
+      QG_SMTP_PORT: ${QG_SMTP_PORT:-587}
+      QG_SMTP_USER: ${QG_SMTP_USER:-}
+      QG_SMTP_PASSWORD: ${QG_SMTP_PASSWORD:-}
+      QG_SMTP_FROM: ${QG_SMTP_FROM:-quagenticus@localhost}
+    volumes:
+      - attachments:/var/lib/quagenticus/attachments
 
   web:
     build:

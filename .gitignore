@@ -80,3 +80,9 @@ web/dist/
 *.pid
 pgdata/
 postgres-data/
+
+# Binarios compilados en la raíz
+/quagenticus-api
+/quagenticus-mcp
+/quagenticus-worker
+data/attachments/

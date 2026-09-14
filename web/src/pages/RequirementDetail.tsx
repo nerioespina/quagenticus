@@ -1,423 +1,502 @@
-import { useState, useRef, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
-  ArrowLeft,
-  Loader2,
-  CheckCircle2,
-  MessageSquare,
-  FileText,
-  Link2,
-  GitCommit,
-  Edit2,
-  Save,
-  X,
-  Lock,
+  Archive, ArrowLeft, Bell, BellOff, Bot, Copy, Download, Edit2, FileText, GitCommit, History, Link2, Loader2, Lock,
+  MessageSquare, MoreHorizontal, MoveRight, Paperclip, Save,
 } from 'lucide-react';
-import { useRequirement, useTransitionRequirement, useUpdateRequirement } from '../hooks/useRequirements';
-import { useStatuses, usePriorities } from '../hooks/useCatalogs';
-import MemberManager from '../components/MemberManager';
-import CommentSection from '../components/CommentSection';
-import RequirementAttachments from '../components/RequirementAttachments';
-import RequirementSubreqs from '../components/RequirementSubreqs';
-import RequirementSidebarExtras from '../components/RequirementSidebarExtras';
-import MarkdownToolbar from '../components/MarkdownToolbar';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
+import StatusSelect from '../components/requirement/StatusSelect';
+import PrioritySelect from '../components/requirement/PrioritySelect';
+import ReadinessCard from '../components/requirement/ReadinessCard';
+import RequirementFields from '../components/requirement/RequirementFields';
+import LinksPanel from '../components/requirement/LinksPanel';
+import RequirementSubreqs from '../components/requirement/RequirementSubreqs';
+import MemberManager from '../components/members/MemberManager';
+import CommentThread from '../components/comments/CommentThread';
+import ActivityTimeline from '../components/comments/ActivityTimeline';
+import AttachmentList from '../components/attachments/AttachmentList';
+import AttachmentUploader from '../components/attachments/AttachmentUploader';
+import Markdown from '../components/markdown/Markdown';
+import MarkdownEditor from '../components/editor/MarkdownEditor';
+import { CANONICAL_TEMPLATE } from '../components/requirement/CreateRequirementModal';
+import Modal from '../components/ui/Modal';
+import Popover from '../components/ui/Popover';
+import { confirmDialog } from '../components/ui/Confirm';
+import { Badge, EmptyState, Spinner, Tabs } from '../components/ui/misc';
+import {
+  useArchiveDocument, useCloneRequirement, useMoveRequirementToSpace, useRequirement, useRequirementChildren, useUpdateRequirement, useWatch,
+} from '../hooks/useRequirements';
+import { useAttachments, useDeleteAttachment } from '../hooks/useAttachments';
+import { useJournals } from '../hooks/useJournals';
+import { useLinks } from '../hooks/useLinks';
+import { useSpace, useSpaces } from '../hooks/useSpaces';
+import { useNotificationMutations } from '../hooks/useNotifications';
+import { api, ApiError, errorMessage } from '../lib/api';
+import type { Requirement } from '../lib/api';
+import { qk } from '../lib/queryKeys';
+import { diffLines } from '../lib/diff';
 
-const STATUS_COLORS: Record<string, string> = {
-  new:          'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
-  triaged:      'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
-  ready:        'bg-[var(--status-ready-bg)] text-[var(--status-ready-text)] border-[var(--status-ready-text)]/30',
-  in_analysis:  'bg-[var(--status-analysis-bg)] text-[var(--status-analysis-text)] border-[var(--status-analysis-text)]/30',
-  in_progress:  'bg-[var(--status-progress-bg)] text-[var(--status-progress-text)] border-[var(--status-progress-text)]/30',
-  in_review:    'bg-[var(--status-review-bg)] text-[var(--status-review-text)] border-[var(--status-review-text)]/30',
-  resolved:     'bg-[var(--status-resolved-bg)] text-[var(--status-resolved-text)] border-[var(--status-resolved-text)]/30',
-  closed:       'bg-[var(--badge-neutral-dim-bg)] text-[var(--badge-neutral-dim-text)] border-[var(--badge-neutral-dim-text)]/30',
-};
+type Tab = 'description' | 'comments' | 'history' | 'files' | 'children';
 
-const PRIORITY_COLORS: Record<string, string> = {
-  urgent:    'bg-[var(--priority-urgent-bg)] text-[var(--priority-urgent-text)] border-[var(--priority-urgent-text)]/30',
-  high:      'bg-[var(--priority-high-bg)] text-[var(--priority-high-text)] border-[var(--priority-high-text)]/30',
-  normal:    'bg-[var(--badge-neutral-bg)] text-[var(--badge-neutral-text)] border-[var(--badge-neutral-text)]/30',
-  low:       'bg-[var(--badge-neutral-dim-bg)] text-[var(--badge-neutral-dim-text)] border-[var(--badge-neutral-dim-text)]/30',
-};
-
-function MarkdownPreview({ content }: { content: string }) {
-  if (!content) {
-    return <p className="text-sm text-[var(--text-muted)] italic">No se ha especificado una descripción para este requerimiento.</p>;
-  }
-  const lines = content.split('\n');
+function ConflictModal({ mine, theirs, onKeepMine, onTakeTheirs, onClose }: { mine: string; theirs: Requirement; onKeepMine: () => void; onTakeTheirs: () => void; onClose: () => void }) {
+  const diff = diffLines(theirs.body_md, mine);
   return (
-    <div className="max-w-none text-sm space-y-3">
-      {lines.map((line, i) => {
-        if (line.startsWith('# ')) return <h1 key={i} className="text-xl font-bold text-[var(--text-primary)]">{line.slice(2)}</h1>;
-        if (line.startsWith('## ')) return <h2 key={i} className="text-lg font-semibold text-[var(--text-primary)]">{line.slice(3)}</h2>;
-        if (line.startsWith('### ')) return <h3 key={i} className="text-base font-semibold text-[var(--text-secondary)]">{line.slice(4)}</h3>;
-        if (line.startsWith('- [ ] ')) return <div key={i} className="flex items-center gap-2"><input type="checkbox" disabled className="accent-[var(--accent-color)]" /><span className="text-[var(--text-secondary)]">{line.slice(6)}</span></div>;
-        if (line.startsWith('- [x] ')) return <div key={i} className="flex items-center gap-2"><input type="checkbox" checked disabled className="accent-[var(--accent-color)]" /><span className="line-through text-[var(--text-muted)]">{line.slice(6)}</span></div>;
-        if (line.startsWith('- ')) return <li key={i} className="text-[var(--text-secondary)] ml-4 list-disc">{line.slice(2)}</li>;
-        if (line === '') return <div key={i} className="h-2" />;
-        return <p key={i} className="text-[var(--text-secondary)] leading-relaxed">{line}</p>;
-      })}
-    </div>
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Otra persona modificó la descripción"
+      className="max-w-3xl"
+      footer={
+        <>
+          <button type="button" className="btn-secondary" onClick={onTakeTheirs}>Descartar mis cambios</button>
+          <button type="button" className="btn-danger" onClick={onKeepMine}>Sobrescribir con mi versión</button>
+        </>
+      }
+    >
+      <p className="text-xs text-[var(--text-secondary)] mb-3">
+        La versión actual es la v{theirs.version}. Revisa las diferencias (en verde lo tuyo, en rojo lo que se perdería) antes de decidir.
+      </p>
+      <pre className="text-xs font-mono max-h-[50vh] overflow-auto rounded-lg border border-[var(--border-color)]">
+        {diff.map((l, i) => (
+          <div key={i} className={l.type === 'add' ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : l.type === 'del' ? 'bg-rose-500/10 text-rose-600' : 'text-[var(--text-secondary)]'}>
+            {l.type === 'add' ? '+ ' : l.type === 'del' ? '- ' : '  '}
+            {l.text}
+          </div>
+        ))}
+      </pre>
+    </Modal>
   );
 }
 
 export default function RequirementDetail() {
-  const { spaceId = '', reqId = '' } = useParams<{ spaceId: string; reqId: string }>();
+  const { spaceId = '', reqId = '' } = useParams();
   const navigate = useNavigate();
-  const { data: req, isLoading } = useRequirement(reqId);
-  const { data: statuses = [] } = useStatuses();
-  const { data: priorities = [] } = usePriorities();
+  const location = useLocation();
+  const qc = useQueryClient();
+  const [params, setParams] = useSearchParams();
+  const { data: req, isLoading, error } = useRequirement(reqId);
+  const update = useUpdateRequirement();
+  const watch = useWatch(reqId);
+  const archive = useArchiveDocument();
+  const clone = useCloneRequirement();
+  const moveSpace = useMoveRequirementToSpace();
+  const { data: spaces = [] } = useSpaces();
+  const { data: space } = useSpace(spaceId);
+  const { readAll } = useNotificationMutations();
+  const { data: comments = [] } = useJournals(reqId, 'comment');
+  const { data: attachments = [] } = useAttachments(reqId);
+  const { data: links = [] } = useLinks(reqId);
+  const { data: children = [] } = useRequirementChildren(reqId);
+  const deleteAttachment = useDeleteAttachment(reqId);
 
-  const transitionReq = useTransitionRequirement();
-  const updateReq = useUpdateRequirement();
+  const tab = (params.get('tab') as Tab) || 'description';
+  const setTab = (t: Tab) => setParams((p) => { p.set('tab', t); return p; }, { replace: true });
 
-  const [activeTab, setActiveTab] = useState<'description' | 'comments' | 'attachments' | 'subrequirements'>('description');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState<string | null>(null);
+  const [conflict, setConflict] = useState<Requirement | null>(null);
+  const [moveOpen, setMoveOpen] = useState(false);
 
-  // Edit states
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [titleValue, setTitleValue] = useState('');
-
-  const [isEditingBody, setIsEditingBody] = useState(false);
-  const [bodyValue, setBodyValue] = useState('');
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dirty = body !== null && body !== req?.body_md;
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
 
   useEffect(() => {
-    if (req) {
-      setTitleValue(req.title);
-      setBodyValue(req.body_md);
-    }
-  }, [req]);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-6 w-6 text-[var(--text-muted)] animate-spin" />
-      </div>
+    if (blocker.state !== 'blocked') return;
+    confirmDialog({ title: 'Cambios sin guardar', message: 'La descripción tiene cambios sin guardar. ¿Salir de todos modos?', confirmLabel: 'Salir', danger: true }).then((v) =>
+      v === false ? blocker.reset() : blocker.proceed(),
     );
-  }
+  }, [blocker]);
 
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirty) e.preventDefault();
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [dirty]);
+
+  // Opening a requirement clears its notifications.
+  useEffect(() => {
+    if (req?.id) readAll.mutate(req.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [req?.id]);
+
+  if (isLoading) return <div className="flex justify-center py-16"><Spinner /></div>;
   if (!req) {
     return (
-      <div className="p-8 text-center text-[var(--text-muted)]">
-        <p className="text-base">Requerimiento no encontrado.</p>
-        <button
-          onClick={() => navigate(`/spaces/${spaceId}/requirements`)}
-          className="mt-4 px-4 py-2 rounded-lg bg-[var(--bg-surface-hover)] hover:bg-[var(--border-color)] text-[var(--text-secondary)] text-sm font-semibold transition-colors"
-        >
-          Volver al listado
-        </button>
+      <div className="p-8">
+        <EmptyState
+          title={error instanceof ApiError && error.status === 404 ? 'Requerimiento no encontrado' : 'No se pudo cargar el requerimiento'}
+          description="Puede haber sido archivado, movido a otro espacio o no tienes acceso."
+          action={<Link to={`/spaces/${spaceId}/requirements`} className="btn-secondary">Volver al listado</Link>}
+        />
       </div>
     );
   }
 
-  const isClosed =
-    req.status_key === 'closed' ||
-    req.status_key === 'resolved' ||
-    req.status_key === 'discarded';
+  const readOnly = req.status_is_closed || req.my_role === 'viewer';
+  const canModerate = req.my_role === 'maintainer' || req.my_role === 'admin';
+  const back = (location.state as { from?: string } | null)?.from ?? `/spaces/${spaceId}/requirements`;
+  const onErr = (e: unknown) => toast.error(errorMessage(e));
 
-  const handleSaveTitle = () => {
-    if (!titleValue.trim() || titleValue.trim() === req.title) {
-      setIsEditingTitle(false);
-      return;
-    }
-    updateReq.mutate(
-      { id: req.id, title: titleValue.trim() },
-      { onSuccess: () => setIsEditingTitle(false) }
+  const saveBody = (force = false) => {
+    if (body === null) return;
+    update.mutate(
+      { id: req.id, body_md: body, ...(force ? {} : { version: req.version }) },
+      {
+        onSuccess: () => {
+          setBody(null);
+          toast.success('Descripción guardada');
+        },
+        onError: async (e) => {
+          if (e instanceof ApiError && e.status === 409) {
+            const fresh = await api.get<Requirement>(`/requirements/${req.id}`);
+            setConflict(fresh);
+          } else onErr(e);
+        },
+      },
     );
   };
 
-  const handleSaveBody = () => {
-    updateReq.mutate(
-      { id: req.id, body_md: bodyValue },
-      { onSuccess: () => setIsEditingBody(false) }
-    );
+  const saveTitle = () => {
+    const t = title.trim();
+    if (!t || t === req.title) {
+      setEditingTitle(false);
+      return;
+    }
+    update.mutate({ id: req.id, title: t }, { onSuccess: () => setEditingTitle(false), onError: onErr });
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Top Bar */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border-color)] bg-[var(--bg-page)]/70 backdrop-blur shrink-0">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate(`/spaces/${spaceId}/requirements`)}
-            className="p-2 rounded-lg hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
+    <div className="flex flex-col min-h-full">
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 px-4 md:px-6 py-3 border-b border-[var(--border-color)] bg-[var(--bg-page)]/90 backdrop-blur">
+        <button type="button" onClick={() => (location.key !== 'default' ? navigate(-1) : navigate(back))} aria-label="Volver" className="icon-btn">
+          <ArrowLeft className="h-4 w-4" />
+        </button>
+        <nav aria-label="Ruta" className="flex items-center gap-1 text-xs text-[var(--text-muted)] min-w-0">
+          <Link to={`/spaces/${spaceId}/requirements`} className="hover:underline">Requerimientos</Link>
+          {req.parent && (
+            <>
+              <span>/</span>
+              <Link to={`/spaces/${spaceId}/requirements/${req.parent.id}`} className="hover:underline truncate max-w-[160px]">{req.parent.ref_key}</Link>
+            </>
+          )}
+          <span>/</span>
+        </nav>
+        <span className="font-mono text-sm font-bold text-[var(--accent-text)]">{req.ref_key}</span>
+        <span className="text-xs text-[var(--text-muted)]">{req.tracker_icon} {req.tracker_name}</span>
+        <StatusSelect reqId={req.id} statusId={req.status_id} statusName={req.status_name} statusColor={req.status_color} disabled={req.my_role === 'viewer'} />
+        <PrioritySelect reqId={req.id} priorityId={req.priority_id} priorityName={req.priority_name} priorityColor={req.priority_color} disabled={readOnly} />
+        {req.claimed_by_agent_name && <Badge color="#7c3aed"><Bot className="h-3 w-3" /> {req.claimed_by_agent_name}</Badge>}
+        <div className="ml-auto flex items-center gap-1">
+          <button type="button" onClick={() => watch.mutate(!req.is_watching, { onError: onErr })} className="btn-ghost text-xs" aria-pressed={req.is_watching}>
+            {req.is_watching ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}
+            {req.is_watching ? 'Dejar de seguir' : 'Seguir'}
           </button>
-          <div className="flex items-center gap-2.5">
-            <span className="text-sm font-mono font-bold text-[var(--accent-text)] px-2 py-0.5 rounded bg-[var(--accent-soft)] border border-[var(--accent-color)]/30">
-              {req.ref_key}
-            </span>
-
-            {/* Status Transition Selector (Punto 1) */}
-            <div className="flex items-center gap-1">
-              <label className="text-[11px] font-semibold text-[var(--text-muted)] uppercase tracking-wider hidden sm:inline">
-                Estado:
-              </label>
-              <select
-                value={req.status_id}
-                onChange={(e) =>
-                  transitionReq.mutate({ id: req.id, to_status_id: e.target.value })
-                }
-                disabled={transitionReq.isPending}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border cursor-pointer focus:outline-none ${
-                  STATUS_COLORS[req.status_key] ?? STATUS_COLORS.new
-                }`}
-              >
-                {statuses.map((s) => (
-                  <option key={s.id} value={s.id} className="bg-[var(--bg-surface)] text-[var(--text-primary)] font-normal uppercase">
-                    {s.name} {s.is_closed ? '(Cerrado)' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Priority Selector (Punto 2) */}
-            <div className="flex items-center gap-1">
-              <select
-                value={req.priority_id}
-                disabled={isClosed || updateReq.isPending}
-                onChange={(e) =>
-                  updateReq.mutate({ id: req.id, priority_id: e.target.value })
-                }
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wider border cursor-pointer focus:outline-none ${
-                  PRIORITY_COLORS[req.priority_key] ?? PRIORITY_COLORS.normal
-                } disabled:opacity-60`}
-              >
-                {priorities.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-[var(--bg-surface)] text-[var(--text-primary)] font-normal uppercase">
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Closed Banner Notice */}
-      {isClosed && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 px-6 py-2 flex items-center gap-2 text-xs text-amber-500 font-medium">
-          <Lock className="h-3.5 w-3.5" />
-          Requerimiento en estado cerrado. Cambia su estado en el menú superior para modificar título, descripción o detalles.
-        </div>
-      )}
-
-      {/* Content Area (Left: Tabs/Body, Right: Metadata Sidebar) */}
-      <div className="flex-1 overflow-y-auto flex">
-        {/* Main Panel */}
-        <div className="flex-1 p-8 space-y-6 max-w-4xl">
-          {/* Title Section (Editable) */}
-          <div>
-            {!isEditingTitle ? (
-              <div className="flex items-center gap-2 group">
-                <h1 className="text-2xl font-bold text-[var(--text-primary)] leading-snug">{req.title}</h1>
-                {!isClosed && (
+          <Popover
+            align="end"
+            width={240}
+            trigger={({ toggle, ref }) => (
+              <button ref={ref} type="button" onClick={toggle} className="icon-btn" aria-label="Más acciones">
+                <MoreHorizontal className="h-4 w-4" />
+              </button>
+            )}
+          >
+            {(close) => (
+              <div className="py-1">
+                <button type="button" className="menu-item" onClick={() => { navigator.clipboard.writeText(window.location.href.split('?')[0]); toast.success('Enlace copiado'); close(); }}>
+                  <Link2 className="h-3.5 w-3.5" /> Copiar enlace
+                </button>
+                <button type="button" className="menu-item" onClick={() => { navigator.clipboard.writeText(`#${req.ref_key}`); toast.success(`#${req.ref_key} copiado`); close(); }}>
+                  <Copy className="h-3.5 w-3.5" /> Copiar referencia
+                </button>
+                {req.my_role !== 'viewer' && (
                   <button
-                    onClick={() => setIsEditingTitle(true)}
-                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-all"
-                    title="Editar título"
+                    type="button"
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      clone.mutate({ id: req.id }, { onSuccess: (c) => { toast.success(`Copia creada: ${c.ref_key}`); navigate(`/spaces/${spaceId}/requirements/${c.id}`); }, onError: onErr });
+                    }}
                   >
-                    <Edit2 className="h-4 w-4" />
+                    <GitCommit className="h-3.5 w-3.5" /> Clonar
+                  </button>
+                )}
+                {canModerate && (
+                  <button type="button" className="menu-item" onClick={() => { close(); setMoveOpen(true); }}>
+                    <MoveRight className="h-3.5 w-3.5" /> Mover a otro espacio
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    close();
+                    const md = await api.get<string>(`/documents/${req.id}/export.md`);
+                    const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${req.ref_key}.md`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
+                  <Download className="h-3.5 w-3.5" /> Exportar markdown
+                </button>
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={async () => {
+                    close();
+                    const md = await api.get<string>(`/requirements/${req.id}/context.md`);
+                    await navigator.clipboard.writeText(md);
+                    toast.success('Contexto para agentes copiado al portapapeles');
+                  }}
+                >
+                  <Bot className="h-3.5 w-3.5" /> Copiar contexto para agentes
+                </button>
+                {req.my_role !== 'viewer' && (
+                  <button
+                    type="button"
+                    className="menu-item text-rose-500"
+                    onClick={async () => {
+                      close();
+                      if ((await confirmDialog({ title: `Archivar ${req.ref_key}`, message: 'Desaparecerá del tablero y del listado. Podrás restaurarlo.', confirmLabel: 'Archivar', danger: true })) === false) return;
+                      archive.mutate({ id: req.id, archived: true, spaceId }, {
+                        onSuccess: () => {
+                          toast.success(`${req.ref_key} archivado`, {
+                            action: { label: 'Deshacer', onClick: () => archive.mutate({ id: req.id, archived: false, spaceId }) },
+                          });
+                          navigate(`/spaces/${spaceId}/requirements`);
+                        },
+                        onError: onErr,
+                      });
+                    }}
+                  >
+                    <Archive className="h-3.5 w-3.5" /> Archivar
                   </button>
                 )}
               </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={titleValue}
-                  onChange={(e) => setTitleValue(e.target.value)}
-                  autoFocus
-                  className="flex-1 bg-[var(--bg-input)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 text-xl font-bold text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)]"
-                />
-                <button
-                  onClick={handleSaveTitle}
-                  disabled={updateReq.isPending}
-                  className="p-2 rounded-lg bg-[var(--accent-color)] text-white hover:bg-[var(--accent-color-hover)] transition-colors"
-                >
-                  <Save className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => {
-                    setTitleValue(req.title);
-                    setIsEditingTitle(false);
-                  }}
-                  className="p-2 rounded-lg bg-[var(--bg-surface-hover)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
             )}
-            <p className="text-xs text-[var(--text-muted)] mt-1 font-mono">
-              Creado el {new Date(req.created_at).toLocaleDateString('es')} · Última actualización el {new Date(req.updated_at).toLocaleDateString('es')}
-            </p>
+          </Popover>
+        </div>
+      </div>
+
+      {req.status_is_closed && (
+        <div className="px-6 py-2 flex items-center gap-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+          <Lock className="h-3.5 w-3.5" />
+          Requerimiento cerrado{req.resolution ? ` (resolución: ${req.resolution})` : ''}. Cambia su estado para volver a editarlo; los comentarios siguen abiertos.
+        </div>
+      )}
+
+      <div className="flex-1 flex flex-col lg:flex-row min-h-0">
+        <div className="flex-1 min-w-0 p-4 md:p-6 space-y-5 max-w-5xl">
+          <div>
+            {editingTitle ? (
+              <input
+                autoFocus
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={saveTitle}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveTitle();
+                  if (e.key === 'Escape') setEditingTitle(false);
+                }}
+                className="input text-2xl font-bold"
+              />
+            ) : (
+              <h1
+                className={`group text-2xl font-bold text-[var(--text-primary)] leading-snug ${readOnly ? '' : 'cursor-text'}`}
+                onClick={() => {
+                  if (readOnly) return;
+                  setTitle(req.title);
+                  setEditingTitle(true);
+                }}
+              >
+                {req.title}
+                {!readOnly && <Edit2 className="inline h-4 w-4 ml-2 opacity-0 group-hover:opacity-60" />}
+              </h1>
+            )}
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="flex items-center gap-1 border-b border-[var(--border-color)]">
-            <button
-              onClick={() => setActiveTab('description')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
-                activeTab === 'description'
-                  ? 'border-[var(--accent-color)] text-[var(--accent-text)]'
-                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <FileText className="h-4 w-4" />
-              Descripción
-            </button>
-            <button
-              onClick={() => setActiveTab('comments')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
-                activeTab === 'comments'
-                  ? 'border-[var(--accent-color)] text-[var(--accent-text)]'
-                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <MessageSquare className="h-4 w-4" />
-              Comentarios
-            </button>
-            <button
-              onClick={() => setActiveTab('attachments')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
-                activeTab === 'attachments'
-                  ? 'border-[var(--accent-color)] text-[var(--accent-text)]'
-                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <Link2 className="h-4 w-4" />
-              Documentos & Archivos
-            </button>
-            <button
-              onClick={() => setActiveTab('subrequirements')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors ${
-                activeTab === 'subrequirements'
-                  ? 'border-[var(--accent-color)] text-[var(--accent-text)]'
-                  : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-              }`}
-            >
-              <GitCommit className="h-4 w-4" />
-              Sub-requerimientos
-            </button>
-          </div>
+          <Tabs<Tab>
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { id: 'description', label: 'Descripción', icon: <FileText className="h-3.5 w-3.5" /> },
+              { id: 'comments', label: 'Comentarios', icon: <MessageSquare className="h-3.5 w-3.5" />, count: comments.filter((c) => !c.deleted_at).length },
+              { id: 'history', label: 'Historial', icon: <History className="h-3.5 w-3.5" /> },
+              { id: 'files', label: 'Documentos y archivos', icon: <Paperclip className="h-3.5 w-3.5" />, count: attachments.length + links.length },
+              { id: 'children', label: 'Sub-requerimientos', icon: <GitCommit className="h-3.5 w-3.5" />, count: children.length },
+            ]}
+          />
 
-          {/* Tab Content */}
-          <div className="py-2">
-            {activeTab === 'description' && (
-              <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[var(--text-muted)] uppercase tracking-wider">Detalle del requerimiento</span>
-                  {!isClosed && !isEditingBody && (
-                    <button
-                      onClick={() => setIsEditingBody(true)}
-                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-[var(--bg-surface-hover)] hover:bg-[var(--border-color)] text-xs text-[var(--text-secondary)] font-semibold transition-colors"
-                    >
-                      <Edit2 className="h-3.5 w-3.5" /> Editar Descripción
-                    </button>
-                  )}
-                </div>
-
-                {!isEditingBody ? (
-                  <MarkdownPreview content={req.body_md} />
-                ) : (
-                  <div className="space-y-3">
-                    <div className="border border-[var(--border-color)] rounded-lg overflow-hidden bg-[var(--bg-surface-hover)]">
-                      <MarkdownToolbar
-                        textareaRef={textareaRef}
-                        onValueChange={(val) => setBodyValue(val)}
-                      />
-                      <textarea
-                        ref={textareaRef}
-                        value={bodyValue}
-                        onChange={(e) => setBodyValue(e.target.value)}
-                        rows={12}
-                        className="w-full bg-[var(--bg-input)] border-t border-[var(--border-color)] p-3 text-sm text-[var(--text-primary)] focus:outline-none font-mono resize-y"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <button
-                        onClick={() => {
-                          setBodyValue(req.body_md);
-                          setIsEditingBody(false);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-[var(--bg-surface-hover)] text-xs font-semibold text-[var(--text-secondary)]"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        onClick={handleSaveBody}
-                        disabled={updateReq.isPending}
-                        className="px-4 py-1.5 rounded-lg bg-[var(--accent-color)] text-white text-xs font-semibold hover:bg-[var(--accent-color-hover)] disabled:opacity-50 flex items-center gap-1.5"
-                      >
-                        {updateReq.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
-                        Guardar Descripción
-                      </button>
-                    </div>
-                  </div>
+          {tab === 'description' && (
+            <section className="card p-5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="section-title">Detalle</span>
+                {!readOnly && body === null && (
+                  <button type="button" className="btn-ghost text-xs" onClick={() => setBody(req.body_md)}>
+                    <Edit2 className="h-3.5 w-3.5" /> Editar descripción
+                  </button>
                 )}
               </div>
-            )}
+              {body !== null ? (
+                <div className="space-y-2">
+                  <MarkdownEditor
+                    value={body}
+                    onChange={setBody}
+                    spaceId={spaceId}
+                    documentId={req.id}
+                    uploadMode="direct"
+                    rows={18}
+                    autoFocus
+                    excludeRefId={req.id}
+                    onSubmit={() => saveBody()}
+                    toolbarExtra={
+                      !body.trim() && (
+                        <button type="button" className="text-[11px] text-[var(--accent-text)] hover:underline" onClick={() => setBody(CANONICAL_TEMPLATE)}>
+                          Plantilla
+                        </button>
+                      )
+                    }
+                  />
+                  <div className="flex items-center justify-end gap-2">
+                    {dirty && <span className="mr-auto text-[11px] text-amber-600">Cambios sin guardar</span>}
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      onClick={async () => {
+                        if (dirty && (await confirmDialog({ title: 'Descartar cambios', danger: true, confirmLabel: 'Descartar' })) === false) return;
+                        setBody(null);
+                      }}
+                    >
+                      Cancelar
+                    </button>
+                    <button type="button" className="btn-primary text-xs" disabled={update.isPending || !dirty} onClick={() => saveBody()}>
+                      {update.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />} Guardar
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Markdown
+                  content={req.body_md}
+                  spaceId={spaceId}
+                  empty={
+                    <p className="text-sm text-[var(--text-muted)] italic">
+                      Sin descripción. {!readOnly && <button type="button" className="underline" onClick={() => setBody(CANONICAL_TEMPLATE)}>Empieza con la plantilla de secciones</button>}
+                    </p>
+                  }
+                />
+              )}
+            </section>
+          )}
 
-            {activeTab === 'comments' && (
-              <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
-                <CommentSection reqId={reqId} />
-              </div>
-            )}
+          {tab === 'comments' && (
+            <section className="card p-5">
+              <CommentThread docId={req.id} spaceId={spaceId} canComment={req.my_role !== 'viewer' || space?.settings?.viewers_can_comment !== false} canModerate={canModerate} />
+            </section>
+          )}
 
-            {activeTab === 'attachments' && (
-              <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
-                <RequirementAttachments spaceId={spaceId} reqId={reqId} />
-              </div>
-            )}
+          {tab === 'history' && (
+            <section className="card p-5">
+              <ActivityTimeline docId={req.id} spaceId={spaceId} />
+            </section>
+          )}
 
-            {activeTab === 'subrequirements' && (
-              <div className="p-6 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
-                <RequirementSubreqs spaceId={spaceId} reqId={reqId} />
+          {tab === 'files' && (
+            <section className="space-y-6">
+              <div className="card p-5 space-y-3">
+                <h3 className="section-title"><Paperclip className="h-3.5 w-3.5" /> Archivos adjuntos</h3>
+                {!readOnly && <AttachmentUploader documentId={req.id} />}
+                <AttachmentList
+                  items={attachments}
+                  onDelete={
+                    readOnly
+                      ? undefined
+                      : async (id) => {
+                          if ((await confirmDialog({ title: 'Eliminar archivo', danger: true, confirmLabel: 'Eliminar' })) !== false) deleteAttachment.mutate(id, { onError: onErr });
+                        }
+                  }
+                  onGoToComment={(journalId) => navigate({ search: '?tab=comments', hash: `comment-${journalId}` }, { replace: true })}
+                />
+                {attachments.length === 0 && <p className="text-xs text-[var(--text-muted)] italic">Sin archivos. Los adjuntos de los comentarios también aparecen aquí.</p>}
               </div>
-            )}
-          </div>
+              <div className="card p-5">
+                <LinksPanel docId={req.id} spaceId={spaceId} canEdit={!readOnly} />
+              </div>
+            </section>
+          )}
+
+          {tab === 'children' && (
+            <section className="card p-5">
+              <RequirementSubreqs spaceId={spaceId} reqId={req.id} canEdit={req.my_role !== 'viewer'} />
+            </section>
+          )}
         </div>
 
-        {/* Right Sidebar */}
-        <aside className="w-80 border-l border-[var(--border-color)] bg-[var(--bg-page)] p-6 space-y-6 shrink-0 overflow-y-auto">
-          {/* Readiness Score / Definition of Ready */}
-          <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)] space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider flex items-center gap-1.5">
-                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                Definition of Ready
-              </span>
-              <span className="text-xs font-mono font-bold text-emerald-500">
-                {req.readiness_score != null ? `${req.readiness_score}%` : '—'}
-              </span>
-            </div>
-            {req.readiness_score != null && (
-              <div className="w-full bg-[var(--bg-surface-hover)] rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-emerald-500 h-2 rounded-full transition-all duration-300"
-                  style={{ width: `${req.readiness_score}%` }}
-                />
-              </div>
-            )}
-            <p className="text-[11px] text-[var(--text-muted)] leading-normal">
-              Puntuación DoR calculada por criterios de completitud técnica y de negocio.
-            </p>
+        <aside className="lg:w-80 shrink-0 border-t lg:border-t-0 lg:border-l border-[var(--border-color)] p-4 space-y-4 lg:overflow-y-auto">
+          <ReadinessCard req={req} />
+          <div className="card p-4">
+            <MemberManager spaceId={spaceId} reqId={req.id} leadUserId={req.lead_user_id} disabled={readOnly} canInvite={req.my_role === 'admin'} />
           </div>
-
-          {/* Members / Lead Management */}
-          <div className="p-4 rounded-xl bg-[var(--bg-surface)] border border-[var(--border-color)]">
-            <MemberManager
-              spaceId={spaceId}
-              reqId={reqId}
-              currentLeadUserId={req.lead_user_id}
-            />
-          </div>
-
-          {/* Sidebar Extras: Classification, Labels, Estimations & Progress */}
-          <RequirementSidebarExtras spaceId={spaceId} req={req} />
+          <RequirementFields req={req} />
         </aside>
       </div>
+
+      {conflict && body !== null && (
+        <ConflictModal
+          mine={body}
+          theirs={conflict}
+          onClose={() => setConflict(null)}
+          onTakeTheirs={() => {
+            qc.setQueryData(qk.requirement(req.id).detail, conflict);
+            setBody(null);
+            setConflict(null);
+          }}
+          onKeepMine={() => {
+            qc.setQueryData(qk.requirement(req.id).detail, conflict);
+            setConflict(null);
+            saveBody(true);
+          }}
+        />
+      )}
+
+      {moveOpen && (
+        <Modal isOpen onClose={() => setMoveOpen(false)} title={`Mover ${req.ref_key} a otro espacio`} className="max-w-md">
+          <p className="text-xs text-[var(--text-secondary)] mb-3">
+            Recibirá una nueva clave. Se quitan categoría, hito, etiquetas propias del espacio, el padre y los miembros sin acceso al destino.
+          </p>
+          <ul className="space-y-1">
+            {spaces.filter((s) => s.id !== spaceId && s.my_role !== 'viewer').map((s) => (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  className="menu-item"
+                  disabled={moveSpace.isPending}
+                  onClick={() =>
+                    moveSpace.mutate(
+                      { id: req.id, space_id: s.id },
+                      {
+                        onSuccess: (r) => {
+                          toast.success(`Movido como ${r.ref_key}`);
+                          setMoveOpen(false);
+                          navigate(`/spaces/${r.space_id}/requirements/${req.id}`);
+                        },
+                        onError: onErr,
+                      },
+                    )
+                  }
+                >
+                  <span className="font-mono text-[var(--accent-text)] w-14">{s.key}</span> {s.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </Modal>
+      )}
     </div>
   );
 }

@@ -1,74 +1,53 @@
-import { useOutletContext } from 'react-router-dom';
-import { Bot, Clock, CheckCircle2, Loader2 } from 'lucide-react';
-import { useRequirements } from '../hooks/useRequirements';
-
-interface Context { spaceId: string; search: string }
+import { Link, useOutletContext } from 'react-router-dom';
+import { Bot, Clock } from 'lucide-react';
+import { Badge, EmptyState, Skeleton } from '../components/ui/misc';
+import { useAgentQueue } from '../hooks/useAdmin';
+import { useAuth } from '../lib/auth';
+import { formatRelative } from '../lib/dates';
+import type { SpaceContext } from '../components/layout/AppLayout';
 
 export default function AgentQueue() {
-  const { spaceId, search } = useOutletContext<Context>();
-  // Show requirements that are ready for an agent
-  const { data: ready = [], isLoading } = useRequirements(spaceId);
-
-  const readyReqs = ready.filter(r => r.status_id === 'ready' || r.claimed_by_agent_id != null);
-  const filtered = readyReqs.filter(r =>
-    !search || r.title.toLowerCase().includes(search.toLowerCase()) || (r.ref_key ?? '').includes(search)
-  );
+  const { spaceId } = useOutletContext<SpaceContext>();
+  const { data: items = [], isLoading } = useAgentQueue(spaceId);
+  const isAdmin = useAuth((s) => s.user?.is_account_admin);
+  const claimed = items.filter((i) => i.is_claimed);
+  const waiting = items.filter((i) => !i.is_claimed);
 
   return (
-    <div className="p-6 space-y-5">
+    <div className="p-4 md:p-6 max-w-5xl space-y-5">
       <div>
-        <h2 className="text-xl font-bold text-[var(--text-primary)]">Cola de Agentes</h2>
-        <p className="text-xs text-[var(--text-muted)] mt-0.5">
-          FOR UPDATE SKIP LOCKED · Leases con expiración automática · MCP en desarrollo
+        <h2 className="text-lg font-bold text-[var(--text-primary)]">Cola de agentes</h2>
+        <p className="text-xs text-[var(--text-muted)]">
+          Requerimientos en estados que admiten agentes, ordenados por prioridad. Los agentes los reclaman por MCP con un lease renovable que expira automáticamente.
+          {isAdmin && <> Gestiona agentes y API keys en <Link to="/admin?tab=agents" className="underline">Administración → Agentes</Link>.</>}
         </p>
       </div>
-
-      <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-3 p-4 bg-[var(--bg-surface)] border border-amber-500/20 rounded-xl text-xs text-amber-600 font-mono">
-          MCP Server — Próximamente. Los requisitos en estado <strong>ready</strong> aparecen en cola para ser tomados por agentes.
-        </div>
-      </div>
-
-      {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 text-[var(--text-muted)] animate-spin" />
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="py-12 text-center border border-dashed border-[var(--border-color)] rounded-xl text-[var(--text-muted)] text-sm">
-          No hay requerimientos en estado <strong className="text-[var(--text-secondary)]">ready</strong> para este espacio.
-        </div>
+      {isLoading ? <Skeleton className="h-40" /> : items.length === 0 ? (
+        <EmptyState icon={<Bot className="h-6 w-6" />} title="La cola está vacía" description="Mueve requerimientos a un estado marcado como «Agentes» (por defecto, Listo)." />
       ) : (
-        <div className="space-y-3">
-          {filtered.map(r => (
-            <div key={r.id} className="flex items-start gap-4 p-4 bg-[var(--bg-surface)] border border-[var(--border-color)] hover:border-[var(--accent-color)]/30 rounded-xl transition-all">
-              <div className="h-9 w-9 rounded-lg bg-violet-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                <Bot className="h-4.5 w-4.5 text-violet-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-xs font-semibold text-[var(--accent-text)]">{r.ref_key}</span>
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-[var(--status-ready-bg)] text-[var(--status-ready-text)] border border-[var(--status-ready-text)]/20">
-                    ready
-                  </span>
-                </div>
-                <p className="font-medium text-[var(--text-secondary)] text-sm">{r.title}</p>
-                {r.readiness_score != null && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
-                    <div className="w-24 bg-[var(--bg-surface-hover)] rounded-full h-1.5 overflow-hidden">
-                      <div className="bg-emerald-500 h-1.5 rounded-full" style={{ width: `${r.readiness_score}%` }} />
-                    </div>
-                    <span className="text-xs font-mono text-[var(--text-muted)]">DoR {r.readiness_score}%</span>
-                  </div>
-                )}
-              </div>
-              <div className="flex items-center gap-1 text-xs text-[var(--text-muted)] shrink-0">
-                <Clock className="h-3 w-3" />
-                {new Date(r.updated_at).toLocaleDateString('es')}
-              </div>
-            </div>
+        <>
+          {[['En curso', claimed], ['Esperando', waiting]].map(([title, list]) => (
+            <section key={title as string} className="space-y-2">
+              <h3 className="section-title">{title as string} <span className="font-mono text-[10px]">{(list as typeof items).length}</span></h3>
+              <ul className="space-y-2">
+                {(list as typeof items).map((r, i) => (
+                  <li key={r.id}>
+                    <Link to={`/spaces/${spaceId}/requirements/${r.id}`} className="card p-3 flex items-center gap-3 hover:border-[var(--accent-color)]/40">
+                      <span className="text-xs font-mono text-[var(--text-muted)] w-6">{r.is_claimed ? <Bot className="h-4 w-4 text-violet-500" /> : i + 1}</span>
+                      <span className="font-mono text-xs text-[var(--accent-text)]">{r.ref_key}</span>
+                      <span className="text-sm text-[var(--text-primary)] truncate flex-1">{r.title}</span>
+                      <Badge color={r.priority_color}>{r.priority_name}</Badge>
+                      {r.readiness_score != null && <span className="text-[10px] font-mono text-[var(--text-muted)]">DoR {r.readiness_score}%</span>}
+                      {r.is_claimed && r.claim_expires_at && (
+                        <span className="text-[10px] text-violet-500 flex items-center gap-1"><Clock className="h-3 w-3" />{r.claimed_by_agent_name} · expira {formatRelative(r.claim_expires_at)}</span>
+                      )}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </div>
+        </>
       )}
     </div>
   );

@@ -136,3 +136,112 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.5);
 }
+
+/* ------------------------------------------------------------------ components */
+@layer components {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-ghost {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap;
+  }
+  .btn-primary { background: var(--accent-color); color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-color-hover); }
+  .btn-secondary { background: var(--bg-surface-hover); color: var(--text-secondary); border: 1px solid var(--border-color); }
+  .btn-secondary:hover:not(:disabled) { color: var(--text-primary); border-color: var(--text-muted); }
+  .btn-danger { background: #e11d48; color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #be123c; }
+  .btn-ghost { color: var(--text-secondary); padding: 0.25rem 0.5rem; }
+  .btn-ghost:hover:not(:disabled) { background: var(--bg-surface-hover); color: var(--text-primary); }
+
+  .icon-btn {
+    @apply inline-flex items-center justify-center rounded-md p-1.5 transition-colors disabled:opacity-40;
+    color: var(--text-muted);
+  }
+  .icon-btn:hover:not(:disabled) { background: var(--bg-surface-hover); color: var(--text-primary); }
+
+  .input {
+    @apply block w-full rounded-lg px-3 py-2 text-sm outline-none transition-colors disabled:opacity-60;
+    background: var(--bg-input);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+  }
+  .input::placeholder { color: var(--text-muted); }
+  .input:focus { border-color: var(--accent-color); }
+
+  .field-label { @apply text-[11px] font-semibold uppercase tracking-wider; color: var(--text-muted); }
+  .section-title { @apply flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider; color: var(--text-muted); }
+  .card { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: 0.75rem; }
+
+  .menu-item {
+    @apply w-full flex items-center gap-2 px-3 py-1.5 text-xs text-left transition-colors disabled:opacity-40;
+    color: var(--text-secondary);
+  }
+  .menu-item:hover:not(:disabled) { background: var(--bg-surface-hover); color: var(--text-primary); }
+
+  .quick-action {
+    @apply flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium;
+    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    color: var(--text-primary);
+  }
+  .quick-action:hover { background: var(--bg-elevated); }
+
+  .tab-pill { @apply flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium; color: var(--text-muted); }
+  .tab-pill--active { background: var(--bg-surface-hover); color: var(--text-primary); }
+
+  .ref-chip {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-px align-baseline text-[0.85em] font-mono font-semibold no-underline;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    border: 1px solid color-mix(in srgb, var(--accent-color) 25%, transparent);
+  }
+  .ref-chip:hover { border-color: var(--accent-color); }
+  .ref-chip__title { @apply hidden max-w-[16rem] truncate font-sans font-medium; }
+  .ref-chip:hover .ref-chip__title { @apply inline-block; }
+  .ref-chip--missing { background: var(--bg-surface-hover); color: var(--text-muted); text-decoration: line-through; border-style: dashed; }
+  .ref-chip--broken { background: transparent; color: #e11d48; border-style: dashed; border-color: #e11d48; font-family: inherit; }
+  .mention { @apply rounded px-0.5 font-semibold; color: var(--accent-text); background: var(--accent-soft); }
+  .attachment-link { @apply inline-flex items-center gap-1 underline; color: var(--accent-text); }
+
+  .markdown { color: var(--text-secondary); line-height: 1.65; overflow-wrap: anywhere; }
+  .markdown > * + * { margin-top: 0.75em; }
+  .markdown h1 { @apply text-2xl font-bold; color: var(--text-primary); }
+  .markdown h2 { @apply text-xl font-semibold mt-6; color: var(--text-primary); }
+  .markdown h3 { @apply text-lg font-semibold mt-4; color: var(--text-primary); }
+  .markdown h4 { @apply font-semibold; color: var(--text-primary); }
+  .markdown a:not(.ref-chip) { color: var(--accent-text); text-decoration: underline; }
+  .markdown strong { color: var(--text-primary); }
+  .markdown ul { @apply list-disc pl-6; }
+  .markdown ol { @apply list-decimal pl-6; }
+  .markdown li + li { margin-top: 0.25em; }
+  .markdown li.task-list-item { list-style: none; margin-left: -1.25rem; }
+  .markdown li.task-list-item input { margin-right: 0.4rem; accent-color: var(--accent-color); }
+  .markdown blockquote { border-left: 3px solid var(--border-color); padding-left: 0.9rem; color: var(--text-muted); }
+  .markdown code { @apply rounded px-1 py-0.5 font-mono text-[0.85em]; background: var(--bg-surface-hover); color: var(--text-primary); }
+  .markdown pre { @apply overflow-x-auto rounded-lg p-3 text-xs; background: var(--bg-surface-hover); }
+  .markdown pre code { background: transparent; padding: 0; }
+  .markdown table { @apply block overflow-x-auto text-sm; border-collapse: collapse; }
+  .markdown th, .markdown td { border: 1px solid var(--border-color); padding: 0.35rem 0.6rem; }
+  .markdown th { background: var(--bg-surface-hover); color: var(--text-primary); }
+  .markdown hr { border-color: var(--border-color); }
+  .markdown img { max-width: 100%; }
+}
+
+/* Visible keyboard focus everywhere (utilities with outline-none would hide it). */
+:focus-visible {
+  outline: 2px solid var(--accent-color) !important;
+  outline-offset: 2px;
+}
+
+@keyframes slidein {
+  from { transform: translateX(24px); opacity: 0.4; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* CodeMirror fills its container */
+.cm-editor { height: 100%; }
+.cm-editor.cm-focused { outline: none !important; }

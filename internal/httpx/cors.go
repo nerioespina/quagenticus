@@ -4,7 +4,8 @@ import (
 	"net/http"
 )
 
-// CORS returns a middleware that sets Access-Control headers.
+// CORS returns a middleware that sets Access-Control headers. With explicit
+// origins, credentials (the refresh-token cookie) are allowed.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	wildcard := len(allowedOrigins) == 1 && allowedOrigins[0] == "*"
 	allowed := make(map[string]struct{}, len(allowedOrigins))
@@ -20,6 +21,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 					w.Header().Set("Access-Control-Allow-Origin", "*")
 				} else if _, ok := allowed[origin]; ok {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Access-Control-Allow-Credentials", "true")
 					w.Header().Add("Vary", "Origin")
 				}
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")

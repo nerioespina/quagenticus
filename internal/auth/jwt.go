@@ -17,44 +17,81 @@ type Claims struct {
 	Scopes    []string `json:"scopes"`
 }
 
-func Authenticate(secretKey string) func(http.Handler) http.Handler {
+// AgentAuthenticator validates agent API keys ("qga_...").
+type AgentAuthenticator interface {
+	AuthenticateAgent(ctx context.Context, key string) (Actor, error)
+}
+
+const AgentKeyPrefix = "qga_"
+
+// Authenticate resolves the actor from a Bearer token: a session JWT or an
+// agent API key. EventSource cannot send headers, so /events also accepts
+// ?access_token=.
+func Authenticate(secretKey string, agents AgentAuthenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
+			tokenStr := ""
+			if authHeader := r.Header.Get("Authorization"); authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
+					unauthorized(w, "cabecera Authorization inválida")
+					return
+				}
+				tokenStr = strings.TrimSpace(parts[1])
+			} else if strings.HasSuffix(r.URL.Path, "/events") {
+				tokenStr = r.URL.Query().Get("access_token")
+			}
+			if tokenStr == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			parts := strings.Split(authHeader, " ")
-			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, "Invalid authorization header", http.StatusUnauthorized)
-				return
-			}
-
-			tokenStr := parts[1]
-			claims := &Claims{}
-			token, err := jwt.ParseWithClaims(tokenStr, claims, func(token *jwt.Token) (interface{}, error) {
-				return []byte(secretKey), nil
-			})
-
-			if err != nil || !token.Valid {
-				http.Error(w, "Invalid token", http.StatusUnauthorized)
-				return
-			}
-
-			actor := Actor{
-				Type:      claims.Type,
-				ID:        claims.Subject,
-				AccountID: claims.AccountID,
-				Scopes:    claims.Scopes,
-				Via:       "session",
+			var actor Actor
+			if strings.HasPrefix(tokenStr, AgentKeyPrefix) && agents != nil {
+				a, err := agents.AuthenticateAgent(r.Context(), tokenStr)
+				if err != nil {
+					unauthorized(w, "API key inválida")
+					return
+				}
+				actor = a
+			} else {
+				claims, err := ParseToken(secretKey, tokenStr)
+				if err != nil {
+					unauthorized(w, "token inválido o expirado")
+					return
+				}
+				actor = Actor{
+					Type:      claims.Type,
+					ID:        claims.Subject,
+					AccountID: claims.AccountID,
+					Scopes:    claims.Scopes,
+					Via:       "session",
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), actorKey{}, actor)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func unauthorized(w http.ResponseWriter, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	w.Write([]byte(`{"code":"unauthorized","message":"` + msg + `"}`)) //nolint:errcheck
+}
+
+func ParseToken(secretKey, tokenStr string) (*Claims, error) {
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims,
+		func(token *jwt.Token) (interface{}, error) { return []byte(secretKey), nil },
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+	)
+	if err != nil || !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+	return claims, nil
 }
 
 type actorKey struct{}
@@ -64,6 +101,11 @@ func ActorFrom(ctx context.Context) Actor {
 		return actor
 	}
 	return Actor{Type: "system"}
+}
+
+// WithActor returns a context carrying the actor (used by background jobs and tests).
+func WithActor(ctx context.Context, a Actor) context.Context {
+	return context.WithValue(ctx, actorKey{}, a)
 }
 
 func GenerateToken(secretKey string, actor Actor, duration time.Duration) (string, error) {

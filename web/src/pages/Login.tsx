@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Layers } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { ApiError } from '../lib/api';
 
 export default function Login() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const login = useAuth(s => s.login);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -19,7 +20,8 @@ export default function Login() {
     setLoading(true);
     try {
       await login(email, password);
-      navigate('/');
+      const next = params.get('next');
+      navigate(next && next.startsWith('/') && !next.startsWith('//') ? next : '/', { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Error inesperado');
     } finally {

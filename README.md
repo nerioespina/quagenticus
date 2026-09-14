@@ -14,13 +14,15 @@ Sistema de gestión de requerimientos orientado a agentes IA — una intersecci�
 docker compose up --build
 ```
 
-Esto construye y arranca cuatro servicios en orden:
+Esto construye y arranca los servicios en orden:
 
 | Servicio | Puerto | Descripción |
 |----------|--------|-------------|
 | `db` | 5433 (host) | PostgreSQL 16 |
-| `migrator` | — | Instala el schema y datos iniciales (se ejecuta una vez) |
-| `api` | 18080 | API REST en Go |
+| `migrator` | — | Instala o actualiza el schema (migraciones + funciones) y, si es nuevo, los datos iniciales |
+| `api` | 18080 | API REST en Go (incluye eventos en tiempo real por SSE) |
+| `mcp` | 18081 | Servidor MCP para agentes (`POST /mcp`, API key del agente en `Authorization`) |
+| `worker` | — | Expira reclamos de agentes, recordatorios de vencimiento, purga de subidas huérfanas, correo opcional |
 | `web` | 3000 | SPA React (servida por nginx) |
 
 Una vez arrancado, abre **http://localhost:3000** en el navegador.
@@ -48,8 +50,8 @@ docker compose up db -d
 export QG_DATABASE_URL="postgresql://qg:qg@localhost:5433/quagenticus"
 export QG_SECRET_KEY="dev-secret-key-cambiar-en-produccion"
 
-# Instalar el schema (primera vez)
-cd db && bash install_database.sh
+# Instalar o actualizar el schema (idempotente: aplica migraciones pendientes y recarga funciones)
+PGPASSWORD=qg QG_DB_PORT=5433 ./db/install_database.sh
 
 # Ejecutar el API
 go run ./cmd/quagenticus-api
@@ -63,8 +65,27 @@ cd web
 npm install
 npm run dev
 # SPA disponible en http://localhost:5173
-# El proxy /api → http://localhost:8080 está preconfigurado en vite.config.ts
+# El proxy /api → http://localhost:8080 está preconfigurado (VITE_API_PROXY lo cambia)
 ```
+
+### Pruebas
+
+```bash
+# SQL (sobre una BD instalada)
+psql -h localhost -p 5433 -U qg -d quagenticus -v ON_ERROR_STOP=1 -f db/tests/smoke_test.sql
+# Go (las de integración se saltan sin QG_TEST_DATABASE_URL)
+QG_TEST_DATABASE_URL=postgresql://qg:qg@localhost:5433/quagenticus go test ./...
+# Frontend
+cd web && npm test && npm run lint
+```
+
+### Base de datos: migraciones
+
+- `db/*/…_data_structure.sql` es el esquema base (solo en instalaciones nuevas).
+- `db/migrations/NNNN_*.sql` son cambios de esquema versionados; se aplican una sola vez y quedan registrados en `schema_migration`.
+- `*_functions.sql`, `*_triggers.sql` y `*_views.sql` se recargan en cada instalación.
+
+Todo cambio de tablas debe llegar como una migración nueva.
 
 ---
 
@@ -74,15 +95,17 @@ npm run dev
 quagenticus/
 ├── cmd/
 │   ├── quagenticus-api/    # Servidor HTTP REST (Go)
-│   ├── quagenticus-mcp/    # Servidor MCP para agentes (en desarrollo)
-│   ├── quagenticus-worker/ # Tareas periódicas (en desarrollo)
+│   ├── quagenticus-mcp/    # Servidor MCP para agentes
+│   ├── quagenticus-worker/ # Tareas periódicas
 │   └── qgctl/              # CLI de administración (en desarrollo)
 ├── internal/
-│   ├── auth/               # JWT + middleware de autenticación
-│   ├── handlers/           # Handlers HTTP (auth, docs, spaces, requirements, boards)
-│   ├── httpx/              # Utilidades HTTP (errores, CORS)
-│   ├── models/             # Structs de request/response
-│   └── db/                 # Pool de conexiones PostgreSQL
+│   ├── auth/               # JWT, refresh tokens, API keys de agentes, rate limiting
+│   ├── authz/              # Aislamiento por cuenta y roles por espacio
+│   ├── events/             # LISTEN/NOTIFY → Server-Sent Events
+│   ├── handlers/           # Handlers HTTP
+│   ├── httpx/              # Errores, CORS, cabeceras de seguridad
+│   ├── storage/            # Almacenamiento de adjuntos y URLs firmadas
+│   └── db/                 # Pool PostgreSQL y helpers JSON
 ├── db/                     # Schema SQL y funciones PL/pgSQL
 │   ├── file_order.conf     # Orden de instalación
 │   ├── install_database.sh # Script de instalación
@@ -109,45 +132,47 @@ quagenticus/
 | `QG_DATABASE_URL` | requerida | URL de conexión PostgreSQL |
 | `QG_SECRET_KEY` | requerida | Clave para firmar JWT |
 | `QG_DB_SCHEMA` | `quagenticus` | Schema PostgreSQL |
-| `QG_ALLOWED_ORIGINS` | `*` | CORS — lista separada por comas |
+| `QG_ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:3000` | CORS — lista separada por comas |
 | `PORT` | `8080` | Puerto del servidor |
 | `QG_DB_MIN_CONNS` | `5` | Mínimo de conexiones al pool |
 | `QG_DB_MAX_CONNS` | `20` | Máximo de conexiones al pool |
+| `QG_COOKIE_SECURE` | `false` | Marca `Secure` en la cookie de sesión (activar tras HTTPS) |
+| `QG_STORAGE_PATH` | `./data/attachments` | Carpeta de adjuntos |
+| `QG_UPLOAD_MAX_MB` | `25` | Tamaño máximo por archivo |
+| `QG_UPLOAD_MAX_FILES` | `10` | Archivos por envío |
+| `QG_PUBLIC_URL` | `http://localhost:3000` | URL pública (enlaces en correos, worker) |
+| `QG_SMTP_HOST` / `_PORT` / `_USER` / `_PASSWORD` / `_FROM` | — | Correo de notificaciones (worker; opcional) |
+| `QG_API_BASE_URL` | `http://localhost:8080/api/v1` | API a la que llama el servidor MCP |
 
 ---
 
-## API — Endpoints principales
+## API — Resumen
+
+Todas las rutas viven bajo `/api/v1`. Salvo login, refresh, health y descargas firmadas, requieren `Authorization: Bearer <token de sesión | API key de agente>`. Los recursos de otra cuenta o de espacios sin acceso responden 404; los roles (`viewer < contributor < maintainer < admin`) se validan en cada ruta.
 
 ```
-POST   /api/v1/auth/login                        Obtener JWT
-GET    /api/v1/auth/me                           Usuario actual
+POST  /auth/login · /auth/refresh · /auth/logout      Sesión (access token 15 min + cookie httpOnly)
+GET   /auth/me · PATCH /auth/me · PATCH /auth/password
+GET   /events                                         SSE de cambios y notificaciones
+GET   /search?q= · /me/work · /notifications(/count)
 
-GET    /api/v1/spaces                            Listar espacios
-POST   /api/v1/spaces                            Crear espacio
-GET    /api/v1/spaces/:id                        Detalle del espacio
+GET   /spaces · POST /spaces · GET|PATCH /spaces/:id · /spaces/:id/members
+GET   /spaces/:id/boards/:boardId                     Una columna por estado, tarjetas enriquecidas
+GET   /spaces/:id/requirements?status_id=&assignee=me&sort=&limit=&offset=
+POST  /spaces/:id/requirements                        Creación completa en una transacción
+GET   /spaces/:id/suggest?q=&types= · /refs/resolve   Autocompletado y resolución de #123, [[doc]], @persona
+POST  /spaces/:id/uploads                             Subidas en staging (comentarios / nuevos requerimientos)
 
-GET    /api/v1/spaces/:id/documents              Listar documentos
-POST   /api/v1/spaces/:id/documents              Crear documento
-GET    /api/v1/documents/:id                     Leer documento
-PATCH  /api/v1/documents/:id                     Editar documento
-DELETE /api/v1/documents/:id                     Archivar documento
-GET    /api/v1/documents/:id/history             Historial de versiones
+GET|PATCH /requirements/:id                           PATCH con null vacía el campo; version = bloqueo optimista
+POST  /requirements/:id/transition · PATCH /move      Reglas del flujo, resolución, reordenamiento
+PUT   /requirements/:id/members · PATCH /lead
+GET|POST /documents/:id/journals?kind=comment|history Comentarios en hilo / historial
+GET|POST /documents/:id/attachments · /links · /backlinks · /labels · /history
+POST  /documents/:id/promote · /archive · /restore · GET /export.md
+GET   /requirements/:id/context.md                    Paquete de contexto para agentes
+POST  /requirements/:id/claim · /claim/renew · /claim/release · /spaces/:id/agent-queue/claim-next
 
-GET    /api/v1/spaces/:id/requirements           Listar requisitos
-POST   /api/v1/spaces/:id/requirements           Crear requisito
-GET    /api/v1/requirements/:id                  Detalle del requisito
-PATCH  /api/v1/requirements/:id                  Editar requisito
-POST   /api/v1/requirements/:id/transition       Cambiar estado
-POST   /api/v1/requirements/:id/members          Agregar miembro
-PATCH  /api/v1/requirements/:id/position         Reordenar en tablero
-GET    /api/v1/requirements/:id/readiness        Score DoR (0-100)
-
-GET    /api/v1/spaces/:id/boards                 Listar tableros
-GET    /api/v1/spaces/:id/boards/:boardId        Tablero con columnas y cards
-
-GET    /api/v1/catalogs/trackers                 Tipos de tracker
-GET    /api/v1/catalogs/priorities               Prioridades
-GET    /api/v1/catalogs/labels                   Etiquetas
+/admin/statuses · /admin/trackers(/:id/transitions) · /admin/priorities · /admin/agents   (admin de cuenta)
 ```
 
 ---

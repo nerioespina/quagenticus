@@ -5,12 +5,13 @@ DECLARE
 BEGIN
     RETURN CASE v_slug
         WHEN 'situacion-actual'       THEN 'current_situation'
-        WHEN 'situacion-actual'       THEN 'current_situation'
         WHEN 'current-situation'      THEN 'current_situation'
         WHEN 'problema'               THEN 'problems'
         WHEN 'problemas'              THEN 'problems'
         WHEN 'problems'               THEN 'problems'
+        WHEN 'problemas-a-resolver'   THEN 'problems'
         WHEN 'solucion-propuesta'     THEN 'proposed_solution'
+        WHEN 'soluciones-propuestas'  THEN 'proposed_solution'
         WHEN 'proposed-solution'      THEN 'proposed_solution'
         WHEN 'criterios-de-aceptacion' THEN 'acceptance_criteria'
         WHEN 'acceptance-criteria'    THEN 'acceptance_criteria'
@@ -48,6 +49,9 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION trg_document_reproject() RETURNS trigger AS $$
 BEGIN
     PERFORM document_sections_rebuild(NEW.id);
+    IF NEW.doc_type = 'requirement' THEN
+        PERFORM requirement_readiness_evaluate(NEW.id);
+    END IF;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

@@ -13,8 +13,10 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/nespina/quagenticus/internal/auth"
+	"github.com/nespina/quagenticus/internal/authz"
 	"github.com/nespina/quagenticus/internal/config"
 	"github.com/nespina/quagenticus/internal/db"
+	"github.com/nespina/quagenticus/internal/events"
 	"github.com/nespina/quagenticus/internal/handlers"
 	"github.com/nespina/quagenticus/internal/httpx"
 	"github.com/nespina/quagenticus/internal/storage"
@@ -30,157 +32,260 @@ func main() {
 		os.Exit(1)
 	}
 
-	database, err := db.New(context.Background(), cfg)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	database, err := db.New(ctx, cfg)
 	if err != nil {
 		slog.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer database.Pool.Close()
 
-	authH := handlers.NewAuth(database, cfg.SecretKey)
-	docsH := handlers.NewDocuments(database)
-	spacesH := handlers.NewSpaces(database)
-	reqsH := handlers.NewRequirements(database)
-	boardsH := handlers.NewBoards(database)
-	journalsH := handlers.NewJournals(database)
-	linksH := handlers.NewLinks(database)
-	store := storage.NewLocal(cfg.StoragePath)
-	attachmentsH := handlers.NewAttachments(database, store)
-	milestonesH := handlers.NewMilestones(database)
-	categoriesH := handlers.NewCategories(database)
-	usersH := handlers.NewUsers(database)
+	api := handlers.New(database, cfg, storage.NewLocal(cfg.StoragePath))
+	hub := events.NewHub(database.Pool)
+	go hub.Run(ctx)
 
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(httpx.CORS(cfg.AllowedOrigins))
-	r.Use(auth.Authenticate(cfg.SecretKey))
-
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok")) //nolint:errcheck
-	})
-
-	r.Route("/api/v1", func(r chi.Router) {
-		// Public
-		r.Post("/auth/login", authH.Login)
-
-		// Protected
-		r.Group(func(r chi.Router) {
-			r.Use(auth.RequireAuth)
-
-			r.Get("/auth/me", authH.Me)
-			r.Patch("/auth/password", usersH.ChangeOwnPassword)
-
-			// System Users
-			r.Get("/users", usersH.List)
-			r.Post("/users", usersH.Create)
-			r.Patch("/users/{id}", usersH.Update)
-			r.Patch("/users/{id}/password", usersH.ChangePassword)
-
-			// Spaces
-			r.Get("/spaces", spacesH.List)
-			r.Post("/spaces", spacesH.Create)
-			r.Get("/spaces/{spaceId}", spacesH.Get)
-			r.Get("/spaces/{spaceId}/members", spacesH.ListMembers)
-			r.Post("/spaces/{spaceId}/members", spacesH.AddMember)
-			r.Patch("/spaces/{spaceId}/members/{userId}", spacesH.UpdateMember)
-			r.Delete("/spaces/{spaceId}/members/{userId}", spacesH.RemoveMember)
-			r.Get("/spaces/{spaceId}/labels", docsH.SpaceLabels)
-			r.Post("/spaces/{spaceId}/labels", docsH.CreateSpaceLabel)
-
-
-			// Documents (nested under space)
-			r.Get("/spaces/{spaceId}/documents", docsH.List)
-			r.Post("/spaces/{spaceId}/documents", docsH.Create)
-			r.Get("/spaces/{spaceId}/boards", boardsH.List)
-
-			// Documents (by id)
-			r.Get("/documents/{id}", docsH.Get)
-			r.Patch("/documents/{id}", docsH.Update)
-			r.Delete("/documents/{id}", docsH.Delete)
-			r.Get("/documents/{id}/history", docsH.History)
-
-			// Requirements (nested under space)
-			r.Get("/spaces/{spaceId}/requirements", reqsH.List)
-			r.Post("/spaces/{spaceId}/requirements", reqsH.Create)
-
-			// Requirements (by id)
-			r.Get("/requirements/{id}", reqsH.Get)
-			r.Patch("/requirements/{id}", reqsH.Update)
-			r.Post("/requirements/{id}/transition", reqsH.Transition)
-			r.Post("/requirements/{id}/members", reqsH.AddMember)
-			r.Get("/requirements/{id}/members", reqsH.ListMembers)
-			r.Delete("/requirements/{id}/members/{userId}", reqsH.RemoveMember)
-			r.Patch("/requirements/{id}/lead", reqsH.SetLead)
-			r.Get("/requirements/{id}/journals", journalsH.ListByRequirement)
-			r.Post("/requirements/{id}/journals", journalsH.Create)
-			r.Get("/requirements/{id}/readiness", reqsH.Readiness)
-			r.Patch("/requirements/{id}/position", reqsH.UpdatePosition)
-			r.Patch("/requirements/{id}/move", reqsH.Move)
-			r.Get("/requirements/{id}/links", linksH.ListByRequirement)
-			r.Post("/requirements/{id}/links", linksH.Create)
-			r.Delete("/requirements/{id}/links/{linkId}", linksH.Delete)
-			r.Get("/requirements/{id}/children", reqsH.ListChildren)
-			r.Get("/requirements/{id}/labels", reqsH.ListLabels)
-			r.Post("/requirements/{id}/labels", reqsH.AddLabel)
-			r.Delete("/requirements/{id}/labels/{labelId}", reqsH.RemoveLabel)
-			r.Get("/requirements/{id}/attachments", attachmentsH.ListByRequirement)
-			r.Post("/requirements/{id}/attachments", attachmentsH.Upload)
-			r.Delete("/requirements/{id}/attachments/{attachId}", attachmentsH.Delete)
-			r.Get("/attachments/{id}/download", attachmentsH.Download)
-
-			// Boards
-			r.Get("/spaces/{spaceId}/boards/{boardId}", boardsH.Get)
-
-			// Milestones
-			r.Get("/spaces/{spaceId}/milestones", milestonesH.List)
-			r.Post("/spaces/{spaceId}/milestones", milestonesH.Create)
-			r.Patch("/milestones/{id}", milestonesH.Update)
-			r.Delete("/milestones/{id}", milestonesH.Delete)
-
-			// Categories
-			r.Get("/spaces/{spaceId}/categories", categoriesH.List)
-			r.Post("/spaces/{spaceId}/categories", categoriesH.Create)
-			r.Patch("/categories/{id}", categoriesH.Update)
-			r.Delete("/categories/{id}", categoriesH.Delete)
-
-			// Catalogs (read-only lookups for UI selects)
-			r.Get("/catalogs/trackers", docsH.Trackers)
-			r.Get("/catalogs/priorities", docsH.Priorities)
-			r.Get("/catalogs/labels", docsH.Labels)
-			r.Get("/catalogs/statuses", docsH.Statuses)
-		})
-	})
-
-	addr := fmt.Sprintf(":%d", cfg.Port)
 	server := &http.Server{
-		Addr:    addr,
-		Handler: r,
+		Addr:              fmt.Sprintf(":%d", cfg.Port),
+		Handler:           Router(api, hub, cfg),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
-		slog.Info("starting server", "addr", addr)
+		slog.Info("starting server", "addr", server.Addr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
+	<-ctx.Done()
 	slog.Info("shutting down server")
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-
-	if err := server.Shutdown(ctx); err != nil {
+	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("server forced to shutdown", "error", err)
 		os.Exit(1)
 	}
-
 	slog.Info("server exited")
+}
+
+// Router wires every route with its authorization guard. Resource routes
+// resolve the owning space first; missing or foreign resources answer 404.
+func Router(api *handlers.API, hub *events.Hub, cfg config.Config) http.Handler {
+	g := api.Guard()
+	space := authz.SpaceParam("spaceId")
+
+	r := chi.NewRouter()
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(httpx.SecurityHeaders)
+	r.Use(httpx.CORS(cfg.AllowedOrigins))
+	r.Use(auth.Authenticate(cfg.SecretKey, api))
+
+	r.Get("/healthz", api.Health)
+
+	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(httpx.LimitJSONBody(2 << 20))
+
+		// Public
+		r.Get("/health", api.Health)
+		r.Post("/auth/login", api.Login)
+		r.Post("/auth/refresh", api.Refresh)
+		r.Post("/auth/logout", api.Logout)
+		r.Get("/files/{id}", api.ServeFile)
+
+		r.Group(func(r chi.Router) {
+			r.Use(auth.RequireAuth)
+
+			r.Get("/auth/me", api.Me)
+			r.With(authz.RequireUser).Patch("/auth/me", api.UpdateMe)
+			r.With(authz.RequireUser).Patch("/auth/password", api.ChangeOwnPassword)
+			r.Get("/events", api.Events(hub))
+			r.Get("/search", api.Search)
+			r.With(authz.RequireUser).Get("/me/work", api.MyWork)
+
+			// Notifications
+			r.Get("/notifications", api.ListNotifications)
+			r.Get("/notifications/count", api.NotificationCount)
+			r.Post("/notifications/read-all", api.MarkAllNotificationsRead)
+			r.Post("/notifications/{id}/read", api.MarkNotificationRead)
+
+			// Account users
+			r.Get("/users", api.ListUsers)
+			r.With(g.RequireAccountAdmin).Post("/users", api.CreateUser)
+			r.With(g.RequireAccountAdmin).Patch("/users/{id}", api.UpdateUser)
+			r.With(g.RequireAccountAdmin).Patch("/users/{id}/password", api.ResetUserPassword)
+
+			// Catalogs
+			r.Get("/catalogs/trackers", api.Trackers)
+			r.Get("/catalogs/priorities", api.Priorities)
+			r.Get("/catalogs/statuses", api.Statuses)
+			r.Get("/catalogs/labels", api.Labels)
+
+			// Account administration
+			r.Route("/admin", func(r chi.Router) {
+				r.Use(g.RequireAccountAdmin)
+				r.Post("/statuses", api.AdminSaveStatus)
+				r.Put("/statuses/order", api.AdminReorderStatuses)
+				r.Patch("/statuses/{id}", api.AdminSaveStatus)
+				r.Delete("/statuses/{id}", api.AdminDeleteStatus)
+				r.Post("/trackers", api.AdminSaveTracker)
+				r.Patch("/trackers/{id}", api.AdminSaveTracker)
+				r.Get("/trackers/{id}/transitions", api.AdminTransitions)
+				r.Put("/trackers/{id}/transitions", api.AdminReplaceTransitions)
+				r.Post("/priorities", api.AdminSavePriority)
+				r.Patch("/priorities/{id}", api.AdminSavePriority)
+				r.Get("/agents", api.ListAgents)
+				r.Post("/agents", api.CreateAgent)
+				r.Patch("/agents/{id}", api.UpdateAgent)
+				r.Post("/agents/{id}/rotate-key", api.RotateAgentKey)
+			})
+
+			// Spaces
+			r.Get("/spaces", api.ListSpaces)
+			r.With(authz.RequireUser).Post("/spaces", api.CreateSpace)
+			r.Route("/spaces/{spaceId}", func(r chi.Router) {
+				viewer := g.Require(space, authz.Viewer)
+				contributor := g.Require(space, authz.Contributor)
+				maintainer := g.Require(space, authz.Maintainer)
+				admin := g.Require(space, authz.Admin)
+
+				r.With(viewer).Get("/", api.GetSpace)
+				r.With(admin).Patch("/", api.UpdateSpace)
+
+				r.With(viewer).Get("/members", api.ListSpaceMembers)
+				r.With(admin).Post("/members", api.AddSpaceMember)
+				r.With(admin).Patch("/members/{userId}", api.UpdateSpaceMember)
+				r.With(admin).Delete("/members/{userId}", api.RemoveSpaceMember)
+
+				r.With(viewer).Get("/labels", api.SpaceLabels)
+				r.With(contributor).Post("/labels", api.CreateSpaceLabel)
+				r.With(viewer).Get("/milestones", api.ListMilestones)
+				r.With(maintainer).Post("/milestones", api.CreateMilestone)
+				r.With(viewer).Get("/categories", api.ListCategories)
+				r.With(maintainer).Post("/categories", api.CreateCategory)
+
+				r.With(viewer).Get("/boards", api.ListBoards)
+				r.With(maintainer).Post("/boards", api.CreateBoard)
+				r.With(viewer).Get("/boards/{boardId}", api.GetBoard)
+
+				r.With(viewer).Get("/documents", api.ListDocuments)
+				r.With(contributor).Post("/documents", api.CreateDocument)
+				r.With(viewer).Get("/requirements", api.ListRequirements)
+				r.With(contributor).Post("/requirements", api.CreateRequirement)
+				r.With(contributor).Post("/requirements/bulk", api.BulkUpdateRequirements)
+
+				r.With(viewer).Get("/suggest", api.Suggest)
+				r.With(viewer).Get("/refs/resolve", api.ResolveRefs)
+				r.With(viewer).Post("/uploads", api.UploadStaged)
+
+				r.With(viewer).Get("/views", api.ListSavedViews)
+				r.With(viewer).Post("/views", api.CreateSavedView)
+
+				r.With(viewer).Get("/agent-queue", api.AgentQueue)
+				r.With(contributor).Post("/agent-queue/claim-next", api.ClaimNext)
+			})
+
+			// Boards and taxonomy by id
+			r.With(g.Require(authz.Board, authz.Maintainer)).Patch("/boards/{boardId}/columns/{statusId}", api.UpdateBoardColumn)
+			r.With(g.Require(authz.Label, authz.Maintainer)).Patch("/labels/{id}", api.UpdateLabel)
+			r.With(g.Require(authz.Label, authz.Maintainer)).Delete("/labels/{id}", api.DeleteLabel)
+			r.With(g.Require(authz.Milestone, authz.Maintainer)).Patch("/milestones/{id}", api.UpdateMilestone)
+			r.With(g.Require(authz.Milestone, authz.Maintainer)).Delete("/milestones/{id}", api.DeleteMilestone)
+			r.With(g.Require(authz.Category, authz.Maintainer)).Patch("/categories/{id}", api.UpdateCategory)
+			r.With(g.Require(authz.Category, authz.Maintainer)).Delete("/categories/{id}", api.DeleteCategory)
+			r.With(g.Require(authz.SavedView, authz.Viewer)).Delete("/views/{id}", api.DeleteSavedView)
+			r.With(g.Require(authz.Journal, authz.Viewer)).Patch("/journals/{id}", api.UpdateComment)
+			r.With(g.Require(authz.Journal, authz.Viewer)).Delete("/journals/{id}", api.DeleteComment)
+			r.With(g.Require(authz.TimeEntry, authz.Contributor)).Delete("/time-entries/{id}", api.DeleteTimeEntry)
+			r.With(g.Require(authz.Attachment, authz.Viewer)).Get("/attachments/{id}/url", api.AttachmentURL)
+			r.With(g.Require(authz.Attachment, authz.Viewer)).Delete("/uploads/{id}", api.DeleteStaged)
+			r.Post("/attachments/sign", api.SignAttachments)
+
+			// Documents (requirements are documents too: every /documents route
+			// also has a /requirements alias)
+			docRoutes := func(r chi.Router) {
+				viewer := g.Require(authz.Document, authz.Viewer)
+				contributor := g.Require(authz.Document, authz.Contributor)
+
+				r.With(viewer).Get("/links", api.ListLinks)
+				r.With(viewer).Get("/backlinks", api.ListBacklinks)
+				r.With(contributor).Post("/links", api.CreateLink)
+				r.With(contributor).Delete("/links/{linkId}", api.DeleteLink)
+
+				r.With(viewer).Get("/attachments", api.ListAttachments)
+				r.With(contributor).Post("/attachments", api.UploadToDocument)
+				r.With(viewer).Delete("/attachments/{attachId}", api.DeleteAttachment)
+
+				r.With(viewer).Get("/labels", api.ListDocumentLabels)
+				r.With(contributor).Post("/labels", api.AddDocumentLabel)
+				r.With(contributor).Delete("/labels/{labelId}", api.RemoveDocumentLabel)
+
+				r.With(viewer).Get("/journals", api.ListJournals)
+				r.With(viewer).Post("/journals", api.CreateComment)
+				r.With(viewer).Put("/watch", api.Watch)
+				r.With(viewer).Delete("/watch", api.Unwatch)
+
+				r.With(viewer).Get("/history", api.DocumentHistory)
+				r.With(viewer).Get("/history/{version}", api.DocumentVersion)
+				r.With(contributor).Post("/restore-version", api.RestoreDocumentVersion)
+				r.With(contributor).Post("/archive", api.ArchiveDocument)
+				r.With(contributor).Post("/restore", api.RestoreDocument)
+				r.With(viewer).Get("/export.md", api.ExportDocument)
+			}
+
+			r.Route("/documents/{id}", func(r chi.Router) {
+				viewer := g.Require(authz.Document, authz.Viewer)
+				contributor := g.Require(authz.Document, authz.Contributor)
+				r.With(viewer).Get("/", api.GetDocument)
+				r.With(contributor).Patch("/", api.UpdateDocument)
+				r.With(contributor).Delete("/", api.ArchiveDocument)
+				r.With(contributor).Patch("/move", api.MoveDocument)
+				r.With(contributor).Post("/promote", api.PromoteDocument)
+				r.With(viewer).Put("/favorite", api.FavoriteDocument)
+				r.With(viewer).Delete("/favorite", api.UnfavoriteDocument)
+				docRoutes(r)
+			})
+
+			r.Route("/requirements/{id}", func(r chi.Router) {
+				viewer := g.Require(authz.Document, authz.Viewer)
+				contributor := g.Require(authz.Document, authz.Contributor)
+				maintainer := g.Require(authz.Document, authz.Maintainer)
+				r.With(viewer).Get("/", api.GetRequirement)
+				r.With(contributor).Patch("/", api.UpdateRequirement)
+				r.With(contributor).Delete("/", api.ArchiveDocument)
+				r.With(contributor).Post("/transition", api.TransitionRequirement)
+				r.With(viewer).Get("/transitions", api.AllowedTransitions)
+				r.With(contributor).Patch("/move", api.MoveRequirement)
+				r.With(contributor).Patch("/position", api.MoveRequirement)
+
+				r.With(viewer).Get("/members", api.ListRequirementMembers)
+				r.With(contributor).Post("/members", api.AddRequirementMember)
+				r.With(contributor).Put("/members", api.SetRequirementMembers)
+				r.With(contributor).Delete("/members/{userId}", api.RemoveRequirementMember)
+				r.With(contributor).Patch("/lead", api.SetRequirementLead)
+
+				r.With(viewer).Get("/readiness", api.Readiness)
+				r.With(viewer).Get("/children", api.ListChildren)
+				r.With(contributor).Post("/clone", api.CloneRequirement)
+				r.With(maintainer).Post("/move-space", api.MoveRequirementToSpace)
+				r.With(viewer).Get("/context.md", api.RequirementContext)
+
+				r.With(viewer).Get("/time-entries", api.ListTimeEntries)
+				r.With(contributor).Post("/time-entries", api.AddTimeEntry)
+
+				r.With(contributor).Post("/claim", api.ClaimRequirement)
+				r.With(contributor).Post("/claim/renew", api.RenewClaim)
+				r.With(contributor).Post("/claim/release", api.ReleaseClaim)
+				docRoutes(r)
+			})
+		})
+	})
+
+	return r
 }

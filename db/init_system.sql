@@ -1,4 +1,4 @@
-e-- Seed data for a fresh installation
+-- Seed data for a fresh installation
 -- Run this after all DDL is applied
 
 DO $$

@@ -1,26 +1,33 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import type { Journal } from '../lib/api';
+import { qk } from '../lib/queryKeys';
 
-export interface ExtendedJournal extends Journal {
-  actor_name?: string;
-}
-
-export function useRequirementJournals(reqId: string) {
+export function useJournals(docId: string, kind: 'comment' | 'history') {
   return useQuery({
-    queryKey: ['requirements', reqId, 'journals'],
-    queryFn: () => api.get<ExtendedJournal[]>(`/requirements/${reqId}/journals`),
-    enabled: !!reqId,
+    queryKey: qk.requirement(docId).journals(kind),
+    queryFn: () => api.get<Journal[]>(`/documents/${docId}/journals?kind=${kind}`),
+    enabled: !!docId,
   });
 }
 
-export function useCreateRequirementJournal(reqId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: { notes_md: string }) =>
-      api.post(`/requirements/${reqId}/journals`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['requirements', reqId, 'journals'] });
-    },
-  });
+export function useCommentMutations(docId: string) {
+  const qc = useQueryClient();
+  const done = () => {
+    qc.invalidateQueries({ queryKey: qk.requirement(docId).journalsAll });
+    qc.invalidateQueries({ queryKey: qk.requirement(docId).attachments });
+    qc.invalidateQueries({ queryKey: qk.requirement(docId).detail });
+  };
+  return {
+    create: useMutation({
+      mutationFn: (data: { notes_md: string; reply_to_id?: string | null; attachment_ids?: string[] }) =>
+        api.post<{ id: string }>(`/documents/${docId}/journals`, data),
+      onSuccess: done,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, notes_md }: { id: string; notes_md: string }) => api.patch(`/journals/${id}`, { notes_md }),
+      onSuccess: done,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => api.delete(`/journals/${id}`), onSuccess: done }),
+  };
 }

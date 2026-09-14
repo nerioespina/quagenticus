@@ -14,7 +14,8 @@ import (
 )
 
 type DB struct {
-	Pool *pgxpool.Pool
+	Pool   *pgxpool.Pool
+	Schema string
 }
 
 func New(ctx context.Context, cfg config.Config) (*DB, error) {
@@ -32,9 +33,11 @@ func New(ctx context.Context, cfg config.Config) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{Pool: pool}, pool.Ping(ctx)
+	return &DB{Pool: pool, Schema: cfg.DBSchema}, pool.Ping(ctx)
 }
 
+// WithActor runs fn in a transaction where qg.* settings identify the actor,
+// so database functions can attribute and authorize their work.
 func (d *DB) WithActor(ctx context.Context, a auth.Actor, fn func(pgx.Tx) error) error {
 	return pgx.BeginFunc(ctx, d.Pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `
@@ -50,4 +53,35 @@ func (d *DB) WithActor(ctx context.Context, a auth.Actor, fn func(pgx.Tx) error)
 		}
 		return fn(tx)
 	})
+}
+
+// JSON runs a query returning a single json/jsonb value inside an actor
+// transaction. It returns pgx.ErrNoRows when the query yields no row or NULL.
+func (d *DB) JSON(ctx context.Context, a auth.Actor, sql string, args ...any) ([]byte, error) {
+	var out []byte
+	err := d.WithActor(ctx, a, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, sql, args...).Scan(&out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return nil, pgx.ErrNoRows
+	}
+	return out, nil
+}
+
+// JSONArray wraps a SELECT into a JSON array of row objects.
+func (d *DB) JSONArray(ctx context.Context, a auth.Actor, sql string, args ...any) ([]byte, error) {
+	return d.JSON(ctx, a, `SELECT coalesce(jsonb_agg(to_jsonb(q)), '[]'::jsonb) FROM (`+sql+`) q`, args...)
+}
+
+// JSONObject wraps a SELECT returning at most one row into a JSON object.
+func (d *DB) JSONObject(ctx context.Context, a auth.Actor, sql string, args ...any) ([]byte, error) {
+	return d.JSON(ctx, a, `SELECT to_jsonb(q) FROM (`+sql+`) q LIMIT 1`, args...)
+}
+
+// JSONMutation wraps an INSERT/UPDATE/DELETE ... RETURNING into a JSON object.
+func (d *DB) JSONMutation(ctx context.Context, a auth.Actor, sql string, args ...any) ([]byte, error) {
+	return d.JSON(ctx, a, `WITH q AS (`+sql+`) SELECT to_jsonb(q) FROM q LIMIT 1`, args...)
 }

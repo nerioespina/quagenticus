@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: quagenticus
+          POSTGRES_USER: qg
+          POSTGRES_PASSWORD: qg
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U qg -d quagenticus"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGPASSWORD: qg
+      QG_DB_HOST: localhost
+      QG_DB_PORT: 5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Install schema (fresh)
+        run: ./db/install_database.sh
+      - name: Re-run installer (idempotent upgrade)
+        run: ./db/install_database.sh
+      - name: SQL smoke tests
+        run: psql -h localhost -U qg -d quagenticus -v ON_ERROR_STOP=1 -f db/tests/smoke_test.sql
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        env:
+          QG_TEST_DATABASE_URL: postgresql://qg:qg@localhost:5432/quagenticus
+        run: go test ./...
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

@@ -1,212 +1,107 @@
 package handlers
 
 import (
-	"encoding/json"
+	"context"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/nespina/quagenticus/internal/auth"
-	"github.com/nespina/quagenticus/internal/db"
+	"github.com/jackc/pgx/v5"
 	"github.com/nespina/quagenticus/internal/httpx"
 )
 
-type Users struct {
-	db *db.DB
+const userColumns = `id, account_id, email, handle, display_name, avatar_url, is_account_admin,
+                     locale, timezone, status, last_login_at, created_at`
+
+// ListUsers returns the users of the actor's account (any member may list them
+// to invite people to spaces; only admins can change them).
+func (a *API) ListUsers(w http.ResponseWriter, r *http.Request) {
+	a.array(w, r, `SELECT `+userColumns+` FROM app_user
+		WHERE account_id = $1 AND status <> 'deleted' ORDER BY display_name`, actor(r).AccountID)
 }
 
-func NewUsers(db *db.DB) *Users {
-	return &Users{db: db}
-}
-
-type UserResponse struct {
-	ID             string  `json:"id"`
-	AccountID      string  `json:"account_id"`
-	Email          string  `json:"email"`
-	DisplayName    string  `json:"display_name"`
-	AvatarURL      *string `json:"avatar_url"`
-	IsAccountAdmin bool    `json:"is_account_admin"`
-	Locale         string  `json:"locale"`
-	Status         string  `json:"status"`
-	CreatedAt      string  `json:"created_at"`
-}
-
-func (h *Users) List(w http.ResponseWriter, r *http.Request) {
-	actor := auth.ActorFrom(r.Context())
-
-	rows, err := h.db.Pool.Query(r.Context(), `
-		SELECT id, account_id, email, display_name, avatar_url, is_account_admin, locale, status, created_at::text
-		FROM app_user
-		WHERE account_id = $1 AND status != 'deleted'
-		ORDER BY display_name
-	`, actor.AccountID)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-	defer rows.Close()
-
-	list := make([]UserResponse, 0)
-	for rows.Next() {
-		var u UserResponse
-		if err := rows.Scan(
-			&u.ID, &u.AccountID, &u.Email, &u.DisplayName, &u.AvatarURL,
-			&u.IsAccountAdmin, &u.Locale, &u.Status, &u.CreatedAt,
-		); err != nil {
-			httpx.RespondError(w, err)
-			return
-		}
-		list = append(list, u)
-	}
-
-	httpx.RespondJSON(w, http.StatusOK, list)
-}
-
-type UserCreateRequest struct {
-	Email          string `json:"email" validate:"required,email"`
-	Password       string `json:"password" validate:"required,min=6"`
+type userCreateRequest struct {
+	Email          string `json:"email"        validate:"required,email"`
+	Password       string `json:"password"     validate:"required,min=8"`
 	DisplayName    string `json:"display_name" validate:"required"`
+	Handle         string `json:"handle"`
 	IsAccountAdmin bool   `json:"is_account_admin"`
 }
 
-func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
-	actor := auth.ActorFrom(r.Context())
-
-	var in UserCreateRequest
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
-		return
-	}
-	if err := validate.Struct(in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: err.Error()})
-		return
-	}
-
-	var u UserResponse
-	err := h.db.Pool.QueryRow(r.Context(), `
-		INSERT INTO app_user (account_id, email, password, display_name, is_account_admin, status, creator_id)
-		VALUES ($1, $2, crypt($3, gen_salt('bf')), $4, $5, 'active', $6)
-		RETURNING id, account_id, email, display_name, avatar_url, is_account_admin, locale, status, created_at::text
-	`, actor.AccountID, in.Email, in.Password, in.DisplayName, in.IsAccountAdmin, actor.ID).Scan(
-		&u.ID, &u.AccountID, &u.Email, &u.DisplayName, &u.AvatarURL,
-		&u.IsAccountAdmin, &u.Locale, &u.Status, &u.CreatedAt,
-	)
-	if err != nil {
+func (a *API) CreateUser(w http.ResponseWriter, r *http.Request) {
+	var in userCreateRequest
+	if err := httpx.Decode(r, &in); err != nil {
 		httpx.RespondError(w, err)
 		return
 	}
-
-	httpx.RespondJSON(w, http.StatusCreated, u)
+	act := actor(r)
+	a.mutation(w, r, http.StatusCreated, `
+		INSERT INTO app_user (account_id, email, password, display_name, handle, is_account_admin, status, creator_id)
+		VALUES ($1, $2, crypt($3, gen_salt('bf')), $4, nullif($5, ''), $6, 'active', $7)
+		RETURNING `+userColumns,
+		act.AccountID, in.Email, in.Password, in.DisplayName, in.Handle, in.IsAccountAdmin, act.ID)
 }
 
-type UserUpdateRequest struct {
-	DisplayName    *string `json:"display_name"`
-	IsAccountAdmin *bool   `json:"is_account_admin"`
-	Status         *string `json:"status"`
-}
-
-func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
+func (a *API) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
-
-	var in UserUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
+	if !httpx.IsUUID(userID) {
+		httpx.RespondError(w, httpx.ErrNotFound)
 		return
 	}
-
-	_, err := h.db.Pool.Exec(r.Context(), `
+	in, err := httpx.DecodeObject(r, "display_name", "is_account_admin", "status", "handle")
+	if err != nil {
+		httpx.RespondError(w, err)
+		return
+	}
+	act := actor(r)
+	if userID == act.ID {
+		if v, ok := in["is_account_admin"]; ok && string(v) == "false" {
+			httpx.RespondError(w, httpx.NewError(http.StatusUnprocessableEntity, "unprocessable", "no puedes quitarte a ti mismo el rol de administrador"))
+			return
+		}
+		if _, ok := in["status"]; ok {
+			httpx.RespondError(w, httpx.NewError(http.StatusUnprocessableEntity, "unprocessable", "no puedes cambiar tu propio estado"))
+			return
+		}
+	}
+	a.mutation(w, r, http.StatusOK, `
 		UPDATE app_user SET
-			display_name = COALESCE($2, display_name),
-			is_account_admin = COALESCE($3, is_account_admin),
-			status = COALESCE($4::user_status, status),
-			updated_at = now()
-		WHERE id = $1
-	`, userID, in.DisplayName, in.IsAccountAdmin, in.Status)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
-	var u UserResponse
-	err = h.db.Pool.QueryRow(r.Context(), `
-		SELECT id, account_id, email, display_name, avatar_url, is_account_admin, locale, status, created_at::text
-		FROM app_user WHERE id = $1
-	`, userID).Scan(
-		&u.ID, &u.AccountID, &u.Email, &u.DisplayName, &u.AvatarURL,
-		&u.IsAccountAdmin, &u.Locale, &u.Status, &u.CreatedAt,
-	)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
-	httpx.RespondJSON(w, http.StatusOK, u)
+		    display_name     = CASE WHEN $3::jsonb ? 'display_name' THEN coalesce(nullif(btrim($3::jsonb->>'display_name'), ''), display_name) ELSE display_name END,
+		    handle           = CASE WHEN $3::jsonb ? 'handle' THEN coalesce(nullif(lower(btrim($3::jsonb->>'handle')), ''), handle) ELSE handle END,
+		    is_account_admin = CASE WHEN $3::jsonb ? 'is_account_admin' THEN ($3::jsonb->>'is_account_admin')::boolean ELSE is_account_admin END,
+		    status           = CASE WHEN $3::jsonb ? 'status' THEN ($3::jsonb->>'status')::user_status ELSE status END,
+		    updated_at       = now()
+		 WHERE id = $1 AND account_id = $2
+		RETURNING `+userColumns, userID, act.AccountID, jsonParam(in))
 }
 
-type ChangePasswordRequest struct {
-	NewPassword string `json:"new_password" validate:"required,min=6"`
+type adminPasswordRequest struct {
+	NewPassword string `json:"new_password" validate:"required,min=8"`
 }
 
-func (h *Users) ChangePassword(w http.ResponseWriter, r *http.Request) {
+func (a *API) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
-
-	var in ChangePasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.NewPassword == "" {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "contraseña inválida"})
+	var in adminPasswordRequest
+	if err := httpx.Decode(r, &in); err != nil {
+		httpx.RespondError(w, err)
 		return
 	}
-
-	_, err := h.db.Pool.Exec(r.Context(), `
-		UPDATE app_user SET
-			password = crypt($2, gen_salt('bf')),
-			updated_at = now()
-		WHERE id = $1
-	`, userID, in.NewPassword)
+	act := actor(r)
+	err := a.tx(r, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE app_user SET password = crypt($3, gen_salt('bf')), updated_at = now()
+			 WHERE id = $1 AND account_id = $2`, uuidOrNil(userID), act.AccountID, in.NewPassword)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return httpx.ErrNotFound
+		}
+		_, err = tx.Exec(ctx, `UPDATE refresh_token SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`, userID)
+		return err
+	})
 	if err != nil {
 		httpx.RespondError(w, err)
 		return
 	}
-
-	w.WriteHeader(http.StatusNoContent)
-}
-
-type ChangeOwnPasswordRequest struct {
-	CurrentPassword string `json:"current_password" validate:"required"`
-	NewPassword     string `json:"new_password" validate:"required,min=6"`
-}
-
-func (h *Users) ChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
-	actor := auth.ActorFrom(r.Context())
-
-	var in ChangeOwnPasswordRequest
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: "payload inválido"})
-		return
-	}
-	if err := validate.Struct(in); err != nil {
-		httpx.RespondJSON(w, http.StatusBadRequest, httpx.ErrorResponse{Code: "bad_request", Message: err.Error()})
-		return
-	}
-
-	// Verify current password
-	var dummy string
-	err := h.db.Pool.QueryRow(r.Context(), `
-		SELECT id FROM app_user WHERE id = $1 AND password = crypt($2, password)
-	`, actor.ID, in.CurrentPassword).Scan(&dummy)
-	if err != nil {
-		httpx.RespondJSON(w, http.StatusUnauthorized, httpx.ErrorResponse{Code: "invalid_credentials", Message: "La contraseña actual es incorrecta"})
-		return
-	}
-
-	_, err = h.db.Pool.Exec(r.Context(), `
-		UPDATE app_user SET
-			password = crypt($2, gen_salt('bf')),
-			updated_at = now()
-		WHERE id = $1
-	`, actor.ID, in.NewPassword)
-	if err != nil {
-		httpx.RespondError(w, err)
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
