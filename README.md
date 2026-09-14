@@ -188,4 +188,4 @@ POST  /requirements/:id/claim · /claim/renew · /claim/release · /spaces/:id/a
 
 ## Licencia
 
-Apache 2.0
+MIT
