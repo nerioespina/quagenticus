@@ -8,7 +8,8 @@
 #      schema_migration, each one inside its own transaction.
 #   3. Code (always): functions, triggers and views, in file_order.conf order.
 #      They are idempotent (CREATE OR REPLACE / DROP IF EXISTS).
-#   4. Seed (fresh installs only): init_system.sql.
+#   4. Seed (always; init_system.sql does nothing when an account already exists,
+#      which also recovers installs interrupted before the seed ran).
 set -e
 
 cd "$(dirname "$0")"
@@ -91,7 +92,8 @@ while IFS= read -r file; do
 done < <(read_order)
 
 # -------------------------------------------------------------------- 4. Seed
-if [ "$FRESH" = "1" ]; then
+ACCOUNTS=$(psql_base -t -A -c "SELECT count(*) FROM account;")
+if [ "$ACCOUNTS" = "0" ]; then
     echo "  [seed] init_system.sql"
     psql_base -f init_system.sql
 fi

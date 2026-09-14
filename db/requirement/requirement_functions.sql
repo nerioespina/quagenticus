@@ -741,7 +741,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION requirement_clone(p_id uuid, p_title text DEFAULT NULL) RETURNS uuid AS $$
 DECLARE
-    v_src  v_requirement;
+    v_src  record;  -- row of v_requirement (the view is created after this file)
     v_new  uuid;
 BEGIN
     SELECT * INTO v_src FROM v_requirement WHERE id = p_id;
